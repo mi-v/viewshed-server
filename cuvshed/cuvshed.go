@@ -4,6 +4,7 @@ import (
     . "vshed/conf"
     "vshed/latlon"
     "image"
+    "vshed/img1b"
     "image/color"
     "log"
 )
@@ -20,7 +21,8 @@ void stopprof();
 */
 import "C"
 
-func Image(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) image.Image {
+//func Image(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) image.Image {
+func Image(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) *img1b.Image {
     //cbuf := C.malloc(4096*2048)
 //for i := 0; i < 100; i++ {
     cimg := C.makeImage(
@@ -33,21 +35,32 @@ func Image(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) image.Imag
             C.int(rect.Height),
         },
     )
-    if (cimg.error != nil) {
-        log.Println("CUDA error:", C.GoString(cimg.error))
+    if (cimg.error.msg != nil) {
+        log.Println("CUDA error:", C.GoString(cimg.error.msg), cimg.error.line)
         return nil
     }
     cr := cimg.rect;
-    buf := C.GoBytes(cimg.buf, (cr.Q.x - cr.P.x) * (cr.Q.y - cr.P.y))
+    buf := C.GoBytes(cimg.buf, (cr.Q.x - cr.P.x) * (cr.Q.y - cr.P.y) / 8)
     C.free(cimg.buf)
-    return &image.Paletted{
+    /*return &image.Gray{
         Pix: buf,
-        Stride: int(cr.Q.x - cr.P.x),
+        Stride: int(cr.Q.x - cr.P.x) / 8,
+        Rect: image.Rect(
+            int(cr.P.x),
+            int(cr.P.y),
+            int(cr.P.x) + (int(cr.Q.x) - int(cr.P.x))/8,
+            int(cr.Q.y),
+        ),
+    }*/
+    //return &image.Paletted{
+    return &img1b.Image{
+        Pix: buf,
+        Stride: int(cr.Q.x - cr.P.x) / 8,
         Rect: image.Rect(int(cr.P.x), int(cr.P.y), int(cr.Q.x), int(cr.Q.y)),
         //Rect: image.Rect(0, 0, int(cr.width), int(cr.height)),
         Palette: color.Palette{
-            color.Gray{0},
-            color.Gray{255},
+            color.Black,
+            color.White,
         },
     }
 //}

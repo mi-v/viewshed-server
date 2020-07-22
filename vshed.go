@@ -10,7 +10,8 @@ import (
     "time"
     "math"
     "os"
-    "image/png"
+    //"image/png"
+    "vshed/img1b/png"
 )
 
 func main() {

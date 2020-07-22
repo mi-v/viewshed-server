@@ -14,6 +14,11 @@ typedef struct {
     int MAXZOOM;
 } Config;
 
+typedef struct cuErrX {
+    const char* msg;
+    int line;
+} cuErrX;
+
 typedef struct LLi {
     int lat, lon;
     #ifdef __cplusplus
@@ -71,10 +76,11 @@ typedef struct Px2 {
 } Px2;
 
 typedef struct {Px2 P; Px2 Q;} PxRect;
+
 typedef struct Image {
     void* buf;
     PxRect rect;
-    const char* error;
+    cuErrX error;
     #ifdef __cplusplus
         int w() {return rect.Q.x - rect.P.x;};
         int h() {return rect.Q.y - rect.P.y;};
@@ -96,5 +102,5 @@ __host__ __device__ Px2 LL::toPx2(int zoom) {
         int((256 << zoom) * ((lon + PI) / (2 * PI))),
         int((128 << zoom) * (1 - logf(tanf(PI / 4 + lat / 2)) / PI))
     };
-}
+};
 #endif

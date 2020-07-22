@@ -7,7 +7,7 @@
 #define sindf(a) sinpif((a) / 180)
 #define cosdf(a) cospif((a) / 180)
 
-#define cuErr(call) {if (cudaSuccess != (call)) throw cudaGetLastError();}
+#define cuErr(call) {if (cudaSuccess != (call)) throw cuErrX{cudaGetErrorString(cudaGetLastError()), __LINE__};}
 
 __constant__ float CUTOFF;
 __constant__ float CUTON;
@@ -194,13 +194,15 @@ __global__ void doVisMap(
         //visMap[visMapOffset] = 1;
     }
 
-    int visMapOffset = visMapWidth * imgPx.y + imgPx.x; // /8
-    visMap[visMapOffset] = visible ? 1 : 0;
+    int visMapOffset = visMapWidth * imgPx.y + imgPx.x;
+    //visMap[visMapOffset] = visible ? 1 : 0;
 
-    /*char b = __brev(__ballot_sync(~0, visible)) >> (threadIdx.x % 32);
+    //unsigned char b = __brev(__ballot_sync(~0, visible)) >> (threadIdx.x % 32 - 24);
+    unsigned bb = __brev(__ballot_sync(~0, visible));
     if (threadIdx.x % 8 == 0) {
-        visMap[visMapOffset] = b;
-    }*/
+        unsigned char b = bb >> (24 - threadIdx.x % 32);
+        visMap[visMapOffset / 8] = b;
+    }
 }
 
 extern "C" {
@@ -254,7 +256,7 @@ extern "C" {
             Img.rect.Q.x += 1;
             Img.rect.Q.y += 1;
 
-            cuErr(cudaMalloc(&Img_d, Img.wh()));
+            cuErr(cudaMalloc(&Img_d, Img.wh() / 8));
 
             doVisMap<<<dim3(Img.w()/256, Img.h()), dim3(256, 1)>>>(
                 HgtMap,
@@ -269,9 +271,9 @@ extern "C" {
             cuErr(cudaGetLastError());
 
             Img.buf = malloc(Img.wh());
-            cuErr(cudaMemcpy(Img.buf, Img_d, Img.wh(), cudaMemcpyDeviceToHost));
-        } catch (cudaError_t errCode) {
-            Img.error = cudaGetErrorString(errCode);
+            cuErr(cudaMemcpy(Img.buf, Img_d, Img.wh() / 8, cudaMemcpyDeviceToHost));
+        } catch (cuErrX error) {
+            Img.error = error;
         }
 
         cudaFree(HgtMap);
