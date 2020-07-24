@@ -93,7 +93,7 @@ typedef struct PxRect {
         __host__ __device__ int contains(Px2 pt) {return pt.x >= P.x && pt.y >= P.y && pt.x < Q.x && pt.y < Q.y;};
         __host__ __device__ PxRect& operator*= (int b) {P*=b; Q*=b; return *this;};
         __host__ __device__ PxRect& operator/= (int b) {P/=b; Q/=b; return *this;};
-        __host__ __device__ Px2 operator[] (int i) {return Px2{i%w(), i/w()};};
+        __host__ __device__ Px2 operator[] (int i) {return Px2{P.x + i%w(), P.y + i/w()};};
         __host__ __device__ PxRect friend operator* (PxRect a, int b) {return a *= b;};
         __host__ __device__ PxRect friend operator/ (PxRect a, int b) {return a /= b;};
     #endif

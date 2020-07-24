@@ -10,7 +10,9 @@ import (
     "time"
     "math"
     "os"
-    //"image/png"
+    "image"
+    "image/color"
+    "vshed/img1b"
     "vshed/img1b/png"
 )
 
@@ -46,12 +48,14 @@ func main() {
     t = time.Now()
     for tl, ok := ts.Rewind(); ok; tl, ok = ts.Next() {
         dir := fmt.Sprintf("tiles/z%d/%d", tl.Z, tl.X)
-        fn := fmt.Sprintf("%s/%d.png")
+        fn := fmt.Sprintf("%s/%d.png", dir, tl.Y)
         fd, err := os.Create(fn)
         if err != nil {
-            err = os.MkdirAll(dir)
-            fd, err := os.Create(fn)
+            err = os.MkdirAll(dir, os.ModePerm)
+            fd, err = os.Create(fn)
             if err != nil {
+                fmt.Println(err)
+                break
                 continue
             }
         }
@@ -67,7 +71,7 @@ func main() {
         png.Encode(fd, img)
         fd.Close()
     }
-    fmt.Println("\nIter: ", time.Since(t), "\n")
+    fmt.Println("\nTile: ", time.Since(t), "\n")
 
     return
 

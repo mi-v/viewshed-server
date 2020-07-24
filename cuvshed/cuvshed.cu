@@ -7,7 +7,8 @@
 #define sindf(a) sinpif((a) / 180)
 #define cosdf(a) cospif((a) / 180)
 
-#define cuErr(call) {if (cudaSuccess != (call)) throw cuErrX{cudaGetErrorString(cudaGetLastError()), __FILE__, __LINE__};}
+#define cuErr(call)  {if (cudaSuccess != (call)) throw cuErrX{cudaGetErrorString(cudaGetLastError()), __FILE__, __LINE__};}
+#define bswap32(i)  (((i & 0xFF) << 24) | ((i & 0xFF00) << 8) | ((i & 0xFF0000) >> 8) | ((i & 0xFF000000) >> 24))
 
 enum visMapMode {
     VIS_IMAGE,
@@ -238,35 +239,31 @@ template __global__ void doVisMap<VIS_TILES>(
 __global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[][256][256/32], PxRect srcRect, PxRect dstRect) {
     int dstTileIdx = int(blockIdx.y * blockDim.y + threadIdx.y) / 256;
     Px2 dstPosInTile = {
-        int(blockIdx.x * blockDim.x + threadIdx.x) * 4, // each thread is 4 px wide
+        int(blockIdx.x * blockDim.x + threadIdx.x) * 32, // each thread is 32 px wide
         int(blockIdx.y * blockDim.y + threadIdx.y) % 256
     };
+
     Px2 dstTilePos = dstRect[dstTileIdx];
     Px2 dstWorldPos = dstTilePos * 256 + dstPosInTile;
     Px2 srcWorldPos = dstWorldPos * 2;
     Px2 srcTilePos = srcWorldPos / 256;
-//printf("%d %p %p\n", __LINE__, SrcTiles, DstTiles);
 
-//printf("%d\n", __LINE__);
     if (!srcRect.contains(srcTilePos)) {
-//printf("%d %d %d %d\n", __LINE__, dstTileIdx, dstPosInTile.y, blockIdx.x * blockDim.x + threadIdx.x);
-        DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = 0;
+        DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = 0x10001000;
         return;
     }
-//printf("%d\n", __LINE__);
 
     Px2 srcPosInTile = srcWorldPos % 256;
 
     uint32_t out = 0;
     uint32_t in;
-    uint32_t mask = 1u<<31;
+    uint32_t mask;
 
-//printf("%d\n", __LINE__);
-    in = SrcTiles [srcRect.indexOf(srcTilePos)] [srcPosInTile.y] [srcPosInTile.x / 4];
-//printf("%d\n", __LINE__);
-    in |= SrcTiles [srcRect.indexOf(srcTilePos)] [srcPosInTile.y+1] [srcPosInTile.x / 4];
-//printf("%d\n", __LINE__);
+    in = SrcTiles [srcRect.indexOf(srcTilePos)] [srcPosInTile.y] [srcPosInTile.x / 32];
+    in |= SrcTiles [srcRect.indexOf(srcTilePos)] [srcPosInTile.y+1] [srcPosInTile.x / 32];
     in |= in<<1;
+    in = bswap32(in);
+    mask = 1u<<31;
 
     for (int i = 0; i < 16; i++) {
         out |= in & mask;
@@ -274,22 +271,19 @@ __global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[
         mask >>= 1;
     }
 
-//printf("%d\n", __LINE__);
-    in = SrcTiles [srcRect.indexOf(srcTilePos)] [srcPosInTile.y] [srcPosInTile.x / 4 + 1];
-//printf("%d\n", __LINE__);
-    in |= SrcTiles [srcRect.indexOf(srcTilePos)] [srcPosInTile.y+1] [srcPosInTile.x / 4 + 1];
-//printf("%d\n", __LINE__);
-    in |= in<<1;
+    in = SrcTiles [srcRect.indexOf(srcTilePos)] [srcPosInTile.y] [srcPosInTile.x / 32 + 1];
+    in |= SrcTiles [srcRect.indexOf(srcTilePos)] [srcPosInTile.y+1] [srcPosInTile.x / 32 + 1];
+    in |= in>>1;
+    in = bswap32(in);
+    mask = 1;
 
     for (int i = 0; i < 16; i++) {
         out |= in & mask;
-        in <<= 1;
-        mask >>= 1;
+        in >>= 1;
+        mask <<= 1;
     }
 
-printf("%d\n", __LINE__);
-    DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = out;
-printf("%d\n", __LINE__);
+    DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = bswap32(out);
 }
 
 void inline clk(const char* str = nullptr) {
@@ -444,7 +438,7 @@ clk("doVisMap");
 //printf("%d %p %p\n", __LINE__, reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + t, reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + t + TS.zoomrect[z].wh());
                 //unzoomTiles<<<dim3(1, 1), dim3(1, 1)>>>(
                     reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + TS.z[z].pretiles, // src tiles ptr cast to array[] of bit tiles of uint32 (hence the /32)
-                    reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + TS.z[z].pretiles + TS.z[z].ntiles, // dst tiles ptr
+                    reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + TS.z[z-1].pretiles, // dst tiles ptr
                     TS.z[z].rect,
                     TS.z[z-1].rect
                 );

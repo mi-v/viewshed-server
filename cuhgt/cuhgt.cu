@@ -39,7 +39,7 @@ __global__ void Query(const short* __restrict__ Hgt, float lat, float lon, float
 extern "C" {
     short* upload(short* Hgt) {
         short* ptr;
-//clock_t t = clock();
+clock_t t = clock();
         cudaMalloc((void**)&ptr, 1280 * 1201 * sizeof(short));
 //printf("malloc: %f\n", (float)(clock() - t) / CLOCKS_PER_SEC);
 //t = clock();

@@ -8,5 +8,5 @@ const CSLAT = MRDLEN / 180 // cell size along latitude
 //const CUTOFF = 150000
 const CUTOFF = 200000
 const CUTON = 80
-const MAXZOOM = 12
+const MAXZOOM = 10
 const TORAD = math.Pi / 180
