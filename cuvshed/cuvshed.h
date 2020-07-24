@@ -16,6 +16,7 @@ typedef struct {
 
 typedef struct cuErrX {
     const char* msg;
+    const char* file;
     int line;
 } cuErrX;
 
@@ -41,8 +42,8 @@ typedef struct LL {
     __host__ __device__ LL operator+ (LL b) {return LL{lat + b.lat, lon + b.lon};};
     __host__ __device__ LL operator- (LL b) {return LL{lat - b.lat, lon - b.lon};};
     __host__ __device__ LL operator/ (float b) {return LL{lat / b, lon / b};};
-    __host__ __device__ LL operator+= (LL b) {lat+=b.lat; lon+=b.lon; return *this;};
-    __host__ __device__ LL operator-= (LL b) {lat-=b.lat; lon-=b.lon; return *this;};
+    __host__ __device__ LL& operator+= (LL b) {lat+=b.lat; lon+=b.lon; return *this;};
+    __host__ __device__ LL& operator-= (LL b) {lat-=b.lat; lon-=b.lon; return *this;};
     __host__ __device__ operator LLi() {return LLi{int(floorf(lat)), int(floorf(lon))};};
     __host__ __device__ operator Vec3();
     __host__ __device__ Px2 toPx2(int z);
@@ -64,7 +65,14 @@ typedef struct Px2 {
     int x, y;
     #ifdef __cplusplus
     __host__ __device__ Px2 operator+ (Px2 b) {return Px2{x+b.x, y+b.y};};
+    __host__ __device__ Px2& operator++ () {x++; y++; return *this;};
+    __host__ __device__ Px2 operator++ (int) {Px2 t(*this); x++; y++; return t;};
     __host__ __device__ Px2 operator- (Px2 b) {return Px2{x-b.x, y-b.y};};
+    __host__ __device__ Px2 operator% (int b) {return Px2{x%b, y%b};};
+    __host__ __device__ Px2& operator*= (int b) {x *= b; y *= b; return *this;};
+    __host__ __device__ Px2& operator/= (int b) {x /= b; y /= b; return *this;};
+    __host__ __device__ Px2 friend operator* (Px2 a, int b) {return a *= b;};
+    __host__ __device__ Px2 friend operator/ (Px2 a, int b) {return a /= b;};
     __host__ __device__ operator float() {return hypotf(x, y);};
     __host__ __device__ LL toLL(int zoom) {
         return LL{
@@ -75,7 +83,21 @@ typedef struct Px2 {
     #endif
 } Px2;
 
-typedef struct {Px2 P; Px2 Q;} PxRect;
+typedef struct PxRect {
+    Px2 P, Q;
+    #ifdef __cplusplus
+        __host__ __device__ int w() {return Q.x - P.x;};
+        __host__ __device__ int h() {return Q.y - P.y;};
+        __host__ __device__ int wh() {return w() * h();};
+        __host__ __device__ int indexOf(Px2 pt) {return w() * (pt.y - P.y) + (pt.x - P.x);};
+        __host__ __device__ int contains(Px2 pt) {return pt.x >= P.x && pt.y >= P.y && pt.x < Q.x && pt.y < Q.y;};
+        __host__ __device__ PxRect& operator*= (int b) {P*=b; Q*=b; return *this;};
+        __host__ __device__ PxRect& operator/= (int b) {P/=b; Q/=b; return *this;};
+        __host__ __device__ Px2 operator[] (int i) {return Px2{i%w(), i/w()};};
+        __host__ __device__ PxRect friend operator* (PxRect a, int b) {return a *= b;};
+        __host__ __device__ PxRect friend operator/ (PxRect a, int b) {return a /= b;};
+    #endif
+} PxRect;
 
 typedef struct Image {
     void* buf;
@@ -84,9 +106,37 @@ typedef struct Image {
     #ifdef __cplusplus
         int w() {return rect.Q.x - rect.P.x;};
         int h() {return rect.Q.y - rect.P.y;};
-        size_t wh() {return w() * h();};
+        int wh() {return w() * h();};
     #endif
 } Image;
+
+typedef struct StripZoom {
+    PxRect rect;
+    int ntiles, pretiles;
+} StripZoom;
+
+typedef struct TileStrip {
+    void* buf;
+    int nbytes;
+    StripZoom z[15];
+    cuErrX error;
+    #ifdef __cplusplus
+        void zsetup(PxRect irect, int maxzoom) {
+            z[maxzoom].rect = irect / 256;
+            z[maxzoom].ntiles = z[maxzoom].rect.wh();
+
+            for (int zl = maxzoom; zl > 0; zl--) {
+                StripZoom &zoom = z[zl-1];
+                zoom = z[zl];
+                zoom.pretiles += zoom.ntiles;
+                zoom.rect.P /= 2;
+                zoom.rect.Q ++;
+                zoom.rect.Q /= 2;
+                zoom.ntiles = zoom.rect.wh();
+            }
+        };
+    #endif
+} TileStrip;
 
 #ifdef __cplusplus
 __host__ __device__ LL::operator Vec3() {

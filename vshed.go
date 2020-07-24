@@ -40,13 +40,45 @@ func main() {
     fmt.Println("GetGrid: ", time.Since(t), "\n")
 
     t = time.Now()
+    ts, _ := cuvshed.TileStrip(ll, 2, grid.Map, grid.Recti)
+    fmt.Println("TileStrip: ", time.Since(t), "\n")
+
+    t = time.Now()
+    for tl, ok := ts.Rewind(); ok; tl, ok = ts.Next() {
+        dir := fmt.Sprintf("tiles/z%d/%d", tl.Z, tl.X)
+        fn := fmt.Sprintf("%s/%d.png")
+        fd, err := os.Create(fn)
+        if err != nil {
+            err = os.MkdirAll(dir)
+            fd, err := os.Create(fn)
+            if err != nil {
+                continue
+            }
+        }
+        img := &img1b.Image{
+            Pix: tl.Pix,
+            Stride: 256 / 8,
+            Rect: image.Rect(0, 0, 256, 256),
+            Palette: color.Palette{
+                color.Black,
+                color.White,
+            },
+        }
+        png.Encode(fd, img)
+        fd.Close()
+    }
+    fmt.Println("\nIter: ", time.Since(t), "\n")
+
+    return
+
+    /*t = time.Now()
     img := cuvshed.Image(ll, 2, grid.Map, grid.Recti)
     fmt.Println("Image: ", time.Since(t), "\n")
 
     t = time.Now()
     f, _ := os.Create("Img.png")
     png.Encode(f, img)
-    fmt.Println("encode: ", time.Since(t), "\n")
+    fmt.Println("encode: ", time.Since(t), "\n")*/
 }
 
 func clamp(v, min, max float64) float64 {
