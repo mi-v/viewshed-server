@@ -249,7 +249,7 @@ __global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[
     Px2 srcTilePos = srcWorldPos / 256;
 
     if (!srcRect.contains(srcTilePos)) {
-        DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = 0x10001000;
+        DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = 0;//x10001000;
         return;
     }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+    "os"
     "fmt"
     "log"
     . "vshed/conf"
@@ -9,14 +10,15 @@ import (
     "vshed/cuvshed"
     "time"
     "math"
-    "os"
-    "image"
-    "image/color"
-    "vshed/img1b"
-    "vshed/img1b/png"
+    "sync"
+    "runtime/pprof"
 )
 
 func main() {
+    pf, _ := os.Create("vs.prof");
+    pprof.StartCPUProfile(pf)
+    defer pprof.StopCPUProfile()
+
     hm, err := hgtmgr.New("../hgt/3")
     if err != nil {
         log.Fatal(err)
@@ -46,31 +48,12 @@ func main() {
     fmt.Println("TileStrip: ", time.Since(t), "\n")
 
     t = time.Now()
+    var wg sync.WaitGroup
     for tl, ok := ts.Rewind(); ok; tl, ok = ts.Next() {
-        dir := fmt.Sprintf("tiles/z%d/%d", tl.Z, tl.X)
-        fn := fmt.Sprintf("%s/%d.png", dir, tl.Y)
-        fd, err := os.Create(fn)
-        if err != nil {
-            err = os.MkdirAll(dir, os.ModePerm)
-            fd, err = os.Create(fn)
-            if err != nil {
-                fmt.Println(err)
-                break
-                continue
-            }
-        }
-        img := &img1b.Image{
-            Pix: tl.Pix,
-            Stride: 256 / 8,
-            Rect: image.Rect(0, 0, 256, 256),
-            Palette: color.Palette{
-                color.Black,
-                color.White,
-            },
-        }
-        png.Encode(fd, img)
-        fd.Close()
+        wg.Add(1)
+        tl.Encode("tiles/", &wg)
     }
+    wg.Wait()
     fmt.Println("\nTile: ", time.Since(t), "\n")
 
     return
