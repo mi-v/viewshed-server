@@ -87,7 +87,7 @@ func TileStrip(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) (*tile
         sz,
         func() {C.free(cTS.buf)},
     );
-    fmt.Println(cTS);
+    //fmt.Println(cTS);
     return TS, nil
 }
 

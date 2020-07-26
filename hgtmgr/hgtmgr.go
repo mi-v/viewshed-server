@@ -3,9 +3,11 @@ package hgtmgr
 import (
     //"fmt"
     "os"
+    "math"
     "errors"
     "vshed/cuhgt"
     "vshed/latlon"
+    . "vshed/conf"
 )
 
 type cacheRecord struct {
@@ -61,6 +63,20 @@ func (m *HgtMgr) GetGrid(rect latlon.Recti, mask []bool) Grid {
     return <-r
 }
 
+func (m *HgtMgr) GetGridAround(ll latlon.LL) Grid {
+    r := latlon.RectiFromRadius(ll, CUTOFF / CSLAT + 0.1)
+    mask := make([]bool, 0, r.Width * r.Height)
+    r.Apply(func (cll latlon.LLi) {
+        cutoff := CUTOFF / CSLAT + 0.1
+        cllf := cll.Float()
+        dY := clamp(ll.Lat, cllf.Lat, cllf.Lat + 1) - ll.Lat
+        dX := (clamp(ll.Lon, cllf.Lon, cllf.Lon + 1) - ll.Lon) * math.Cos((ll.LatR() + cllf.LatR()) / 2)
+        mask = append(mask, dX * dX + dY * dY < cutoff * cutoff)
+    })
+
+    return m.GetGrid(r, mask)
+}
+
 func (m *HgtMgr) FreeGrid(g Grid) {
     m.free <- g
 }
@@ -102,4 +118,8 @@ func (m *HgtMgr) run() {
                 print("TODO: кеш доделать\n")
         }
     }
+}
+
+func clamp(v, min, max float64) float64 {
+    return math.Min(math.Max(v, min), max)
 }

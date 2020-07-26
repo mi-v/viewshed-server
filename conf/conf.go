@@ -10,3 +10,5 @@ const CUTOFF = 200000
 const CUTON = 80
 const MAXZOOM = 12
 const TORAD = math.Pi / 180
+const HGTDIR = "/projects/vshed/hgt"
+const TILEDIR = "/projects/vshed/tiles"

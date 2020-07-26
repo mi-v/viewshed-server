@@ -36,7 +36,10 @@ func init() {
     tasks = make(chan encTask)
     for i := 0; i < 7; i++ {
         go func() {
-            e := png.Encoder{BufferPool: &encPool{}}
+            e := png.Encoder{
+                BufferPool: &encPool{},
+                //CompressionLevel: png.BestSpeed,
+            }
             for task := range tasks {
                 dir := fmt.Sprintf("%s/z%d/%d", task.dir, task.Z, task.X)
                 fn := fmt.Sprintf("%s/%d.png", dir, task.Y)

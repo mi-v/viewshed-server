@@ -40,6 +40,10 @@ func (r Rect) H() int {
     return r.Q.Y - r.P.Y
 }
 
+func (r Rect) WH() int {
+    return r.W() * r.H()
+}
+
 func (r Rect) Index(i int) Corner {
     return Corner{
         r.P.X + i % r.W(),
