@@ -68,7 +68,7 @@ __global__ void Query(const short** __restrict__ HgtMap, Recti rect, LL ll, floa
     *result = hgtQuery(HgtMap, rect, ll);
 }
 
-__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, Vec3 myP, float myH, LL myL)
+__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, Vec3 myP, float myAlt, LL myL)
 {
     int az = blockIdx.x * blockDim.x + threadIdx.x;
     int distN = blockIdx.y * blockDim.y + threadIdx.y;
@@ -91,7 +91,7 @@ __global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float*
 
     float trueDist = float(losP);
 
-    float elev = 1 - myP * losP / (trueDist * (ERAD+myH));
+    float elev = myP * losP / (trueDist * (ERAD+myAlt));
 
     int ofs = distN * ANGSTEPS + az;
     AzEleD[ofs] = elev;
@@ -100,10 +100,10 @@ __global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float*
 __global__ void elevProject(float* AzEleD)
 {
     int az = blockIdx.x * blockDim.x + threadIdx.x;
-    float elev = -1;
+    float elev = 1;
     for (int distN = 1; distN < DSTEPS; distN++) {
         int ofs = distN * ANGSTEPS + az;
-        if (AzEleD[ofs] < elev) {
+        if (AzEleD[ofs] > elev) {
             AzEleD[ofs] = elev;
         } else {
             elev = AzEleD[ofs];
@@ -117,7 +117,7 @@ __global__ void doVisMap(
     Recti hgtRect,
     const float* __restrict__ AzEleD,
     Vec3 myP,
-    float myH,
+    float myAlt,
     LL myL,
     Px2 pxBase,
     unsigned char* __restrict__ visMap
@@ -142,11 +142,12 @@ __global__ void doVisMap(
 
     float trueDist = float(losP);
 
-    float elev = 1 - myP * losP / (trueDist * (ERAD+myH));
+    float elev = myP * losP / (trueDist * (ERAD+myAlt));
 
     LL myR = myL.toRad();
 
-    float dist = ERAD * seaDistR(myR, ptR);
+    float distR = seaDistR(myR, ptR);
+    float dist = ERAD * distR;
     int distN = floorf((sqrtf(1 + 8 * (dist - CUTON) / DSTEP) - 1) / 2);
     float distNdist = CUTON + DSTEP * distN * (distN + 1) / 2;
 
@@ -167,7 +168,9 @@ __global__ void doVisMap(
     }*/
     bool visible = false;
 
-    if (distN < DSTEPS && elev + 0.0001 > interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
+    //if (distN < DSTEPS && elev - 0.0001 < interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
+    //if (distN < DSTEPS && elev - 0.01 * distR < interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
+    if (distN < DSTEPS && elev <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
         Px2 myPx = myR.toPx2(MAXZOOM);
 
         float pxDist = float(ptPx - myPx);
@@ -190,9 +193,9 @@ __global__ void doVisMap(
 
             trueDist = float(losP);
 
-            float stepElev = 1 - myP * losP / (trueDist * (ERAD+myH));
+            float stepElev = myP * losP / (trueDist * (ERAD+myAlt));
 
-            if (stepElev > elev) {
+            if (stepElev < elev) {
                 visible = false;
                 break;
             }
@@ -219,7 +222,7 @@ __global__ void doVisMap(
     Recti hgtRect,
     const float* __restrict__ AzEleD,
     Vec3 myP,
-    float myH,
+    float myAlt,
     LL myL,
     Px2 pxBase,
     unsigned char* __restrict__ visMap
@@ -230,7 +233,7 @@ template __global__ void doVisMap<VIS_TILES>(
     Recti hgtRect,
     const float* __restrict__ AzEleD,
     Vec3 myP,
-    float myH,
+    float myAlt,
     LL myL,
     Px2 pxBase,
     unsigned char* __restrict__ visMap
@@ -381,8 +384,9 @@ clk();
             cuErr(cudaMalloc(&HgtMap_d, hgtRect.width * hgtRect.height * sizeof(uint64_t)));
             cuErr(cudaMemcpy(HgtMap_d, HgtMapIn, hgtRect.width * hgtRect.height * sizeof(uint64_t), cudaMemcpyHostToDevice));
 
+            float myAlt = Query(HgtMap_d, hgtRect, myL) + myH;
             LL myR = myL.toRad();
-            Vec3 myP = (ERAD + Query(HgtMap_d, hgtRect, myL) + myH) * Vec3(myR);
+            Vec3 myP = (ERAD + myAlt) * Vec3(myR);
 
             cuErr(cudaMalloc(&AzEleD_d, ANGSTEPS * DSTEPS * sizeof(float)));
 
@@ -391,7 +395,7 @@ clk();
                 hgtRect,
                 AzEleD_d,
                 myP,
-                myH,
+                myAlt,
                 myL
             );
             cuErr(cudaGetLastError());
@@ -422,7 +426,7 @@ clk();
                 hgtRect,
                 AzEleD_d,
                 myP,
-                myH,
+                myAlt,
                 myL,
                 irect.P,
                 TSbuf_d

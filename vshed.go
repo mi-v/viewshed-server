@@ -62,11 +62,11 @@ func main() {
         ll := latlon.LL{lat, lon}.Wrap()
 
         tilepath := fmt.Sprintf(
-            "/%+08.4f/%+09.4f",
+            "%+08.4f,%+09.4f",
             lat,
             lon,
         )
-        tiledir := TILEDIR + tilepath
+        tiledir := TILEDIR + "/" + tilepath
 
         jf, err := os.Open(tiledir + "/layout.json")
         if err == nil {
@@ -76,10 +76,11 @@ func main() {
         }
 
         response := struct {
-            Tilemask [][]byte `json:"tm,omitempty"`
+            Tilemask [][]byte `json:"tmap,omitempty"`
             //Tm [][]int32 `json:"tm,omitempty"`
-            Zrects []tiler.Rect `json:"zr,omitempty"`
-            Tilepath string `json:"tp,omitempty"`
+            Zrects []tiler.Rect `json:"zrct,omitempty"`
+            Tilepath string `json:"tpth,omitempty"`
+            Zlim int `json:"zlim,omitempty"`
         }{}
 
         defer func() {
@@ -125,6 +126,7 @@ func main() {
         fmt.Println("\nTile cutting: ", time.Since(t))
         response.Tilemask = tilemask
         response.Tilepath = tilepath
+        response.Zlim = MAXZOOM
 
         return
 

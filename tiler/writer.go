@@ -59,7 +59,7 @@ func init() {
                     Rect: image.Rect(0, 0, 256, 256),
                     Palette: color.Palette{
                         color.Black,
-                        color.White,
+                        color.Transparent,
                     },
                 }
                 //e.Encode(ioutil.Discard, img)
