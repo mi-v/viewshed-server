@@ -63,7 +63,14 @@ func NewStrip(buf []byte, sz []StripZoom, free func()) *Strip {
     }
 }
 
+func (ts *Strip) MaxZ() int {
+    return len(ts.Z) - 1;
+}
+
 func (ts *Strip) Free() {
+    if ts.free == nil {
+        return
+    }
     ts.buf = nil
     ts.free()
     ts.free = nil

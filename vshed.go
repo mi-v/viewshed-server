@@ -71,13 +71,14 @@ func main() {
         jf, err := os.Open(tiledir + "/layout.json")
         if err == nil {
             defer jf.Close()
+            now := time.Now()
+            os.Chtimes(jf.Name(), now, now)
             http.ServeContent(w, r, "", time.Time{}, jf)
             return
         }
 
         response := struct {
             Tilemask [][]byte `json:"tmap,omitempty"`
-            //Tm [][]int32 `json:"tm,omitempty"`
             Zrects []tiler.Rect `json:"zrct,omitempty"`
             Tilepath string `json:"tpth,omitempty"`
             Zlim int `json:"zlim,omitempty"`
@@ -91,24 +92,25 @@ func main() {
 
         var t time.Time
 
-        //ll := latlon.LL{50.339926, 87.748689} // ретр-р
-        //ll := latlon.LL{49.809202, 86.589432} // Белуха
-
         t = time.Now()
         grid := hm.GetGridAround(ll)
         fmt.Println("GetGrid: ", time.Since(t), "\n")
 
         t = time.Now()
-        ts, _ := cuvshed.TileStrip(ll, 2, grid.Map, grid.Recti)
+        ts, err := cuvshed.TileStrip(ll, 2, grid.Map, grid.Recti)
+        grid.Free()
+        if err != nil {
+            log.Println(err)
+            http.Error(w, "Server error", 500)
+            return
+        }
         fmt.Println("TileStrip: ", time.Since(t), "\n")
 
         t = time.Now()
-        tilemask := make([][]byte, MAXZOOM-7)
-        //tilemask := make([][]int32, MAXZOOM-7)
+        tilemask := make([][]byte, ts.MaxZ()-7)
         for z, Z := range ts.Z {
             if z > 7 {
                 tilemask[z-8] = make([]byte, (Z.WH()+7)/8)
-                //tilemask[z-8] = make([]int32, (Z.WH()+31)/32)
             }
             response.Zrects = append(response.Zrects, Z.Rect)
         }
@@ -119,14 +121,14 @@ func main() {
             if tl.Z > 7 {
                 tlIdx := ts.Z[tl.Z].IndexOf(tl.Corner)
                 tilemask[tl.Z-8][tlIdx/8] |= 1 << (tlIdx%8)
-                //tilemask[tl.Z-8][tlIdx/32] |= 1 << (tlIdx%32)
             }
         }
         wg.Wait()
+        ts.Free()
         fmt.Println("\nTile cutting: ", time.Since(t))
         response.Tilemask = tilemask
         response.Tilepath = tilepath
-        response.Zlim = MAXZOOM
+        response.Zlim = ts.MaxZ();
 
         return
 

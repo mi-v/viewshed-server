@@ -1,6 +1,7 @@
 // not likely to change
-#define PI 3.14159265359f
+#define PI 3.141592653589793f
 #define ERAD 6371000.0f
+//#define ERAD 7800000.0f
 #define TORAD (PI / 180.0f)
 #define MRDLEN (PI * ERAD)
 #define CSLAT (MRDLEN / 180.0f) // cell size along latitude
@@ -11,7 +12,7 @@
 typedef struct {
     float CUTOFF;
     float CUTON;
-    int MAXZOOM;
+    int MAXWIDTH;
 } Config;
 
 typedef struct cuErrX {
@@ -118,10 +119,12 @@ typedef struct StripZoom {
 typedef struct TileStrip {
     void* buf;
     int nbytes;
+    int zoom;
     StripZoom z[15];
     cuErrX error;
     #ifdef __cplusplus
-        void zsetup(PxRect irect, int maxzoom) {
+        void setup(PxRect irect, int maxzoom) {
+            zoom = maxzoom;
             z[maxzoom].rect = irect / 256;
             z[maxzoom].ntiles = z[maxzoom].rect.wh();
 

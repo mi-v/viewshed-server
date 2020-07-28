@@ -2,7 +2,7 @@
 #include <stdio.h>
 //#include <time.h>
 
-__global__ void byteswap(int32_t* Hgt) {
+__global__ void byteswap16(int32_t* Hgt) {
     int col = blockIdx.x*blockDim.x+threadIdx.x;
     int row = blockIdx.y*blockDim.y+threadIdx.y;
 
@@ -37,16 +37,16 @@ __global__ void Query(const short* __restrict__ Hgt, float lat, float lon, float
 }
 
 extern "C" {
-    short* upload(short* Hgt) {
+    uint64_t upload(short* Hgt) {
         short* ptr;
-clock_t t = clock();
         cudaMalloc((void**)&ptr, 1280 * 1201 * sizeof(short));
-//printf("malloc: %f\n", (float)(clock() - t) / CLOCKS_PER_SEC);
-//t = clock();
         cudaMemcpy2D(ptr, 2560, Hgt, 1201 * sizeof(short), 1201 * sizeof(short), 1201, cudaMemcpyHostToDevice);
-//printf("memcpy: %f\n", (float)(clock() - t) / CLOCKS_PER_SEC);
-        byteswap<<<dim3(19, 38), dim3(32, 32)>>>((int32_t*)ptr);
-        return ptr;
+        byteswap16<<<dim3(19, 38), dim3(32, 32)>>>((int32_t*)ptr);
+        return (uint64_t)ptr;
+    }
+
+    void freeHgt(uint64_t Hgt_d) {
+        cudaFree((void*)Hgt_d);
     }
 
     float Query(uint64_t Hgt, float lat, float lon) {

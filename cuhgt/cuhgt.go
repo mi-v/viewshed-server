@@ -11,6 +11,7 @@ import (
 // #include <stdint.h>
 // #include <stdlib.h>
 // uint64_t upload(short* Hgt);
+// void freeHgt(uint64_t ptr);
 // float Query(uint64_t Hgt, float lat, float lon);
 // #cgo LDFLAGS: -L../ -lcuhgt
 import "C"
@@ -42,6 +43,10 @@ func Open(ll latlon.LLi, dir string) (ptr uint64) {
     //ptr = uintptr(C.upload((*C.char)(&hgt[0])))
     ptr = uint64(C.upload((*C.short)(cbuf)))
     return
+}
+
+func Free (ptr uint64) {
+    C.freeHgt(C.ulong(ptr))
 }
 
 func Query (ptr uint64, ll latlon.LL) float64 {

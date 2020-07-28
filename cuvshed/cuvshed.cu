@@ -17,7 +17,6 @@ enum visMapMode {
 
 __constant__ float CUTOFF;
 __constant__ float CUTON;
-__constant__ int MAXZOOM;
 __constant__ float DSTEP;
 static Config config;
 
@@ -33,6 +32,16 @@ __device__ float seaDistR(LL p0, LL p1)
     return 2 * asinf(sqrtf(
         sinf(d.lat/2) * sinf(d.lat/2) + cosf(p0.lat) * cosf(p1.lat) * sinf(d.lon/2) * sinf(d.lon/2)
     ));
+}
+
+__device__ float abElev(float a, float b, float d)
+{
+    a /= ERAD;
+    b /= ERAD;
+    if(0)return (a + d * sinf(0.83f * d/2) - b * cos(0.83f * d)) /
+        (d * cos(0.83f * d/2) + b * sin(0.83f * d));
+    return (a + d * sinf(d/2) - b * cos(d)) /
+        (d * cos(d/2) + b * sin(d));
 }
 
 __device__ float hgtQuery(const short** __restrict__ HgtMap, Recti rect, LL ll)
@@ -85,13 +94,7 @@ __global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float*
 
     float hgt = hgtQuery(HgtMap, hgtRect, ptL);
 
-    Vec3 ptP = (ERAD+hgt) * Vec3(ptR);
-
-    Vec3 losP = myP - ptP;
-
-    float trueDist = float(losP);
-
-    float elev = myP * losP / (trueDist * (ERAD+myAlt));
+    float elev = abElev(myAlt, hgt, rDist);
 
     int ofs = distN * ANGSTEPS + az;
     AzEleD[ofs] = elev;
@@ -120,7 +123,8 @@ __global__ void doVisMap(
     float myAlt,
     LL myL,
     Px2 pxBase,
-    unsigned char* __restrict__ visMap
+    unsigned char* __restrict__ visMap,
+    int zoom
 )
 {
     Px2 imgPx = {
@@ -131,22 +135,16 @@ __global__ void doVisMap(
 
     Px2 ptPx = pxBase + imgPx;
 
-    LL ptR = ptPx.toLL(MAXZOOM);
-
+    LL ptR = ptPx.toLL(zoom);
     LL ptL = ptR.fromRad();
+
+    LL myR = myL.toRad();
+    float distR = seaDistR(myR, ptR);
 
     float hgt = hgtQuery(HgtMap, hgtRect, ptL);
 
-    Vec3 ptP = (ERAD+hgt) * Vec3(ptR);
-    Vec3 losP = myP - ptP;
+    float elev = abElev(myAlt, hgt, distR);
 
-    float trueDist = float(losP);
-
-    float elev = myP * losP / (trueDist * (ERAD+myAlt));
-
-    LL myR = myL.toRad();
-
-    float distR = seaDistR(myR, ptR);
     float dist = ERAD * distR;
     int distN = floorf((sqrtf(1 + 8 * (dist - CUTON) / DSTEP) - 1) / 2);
     float distNdist = CUTON + DSTEP * distN * (distN + 1) / 2;
@@ -168,32 +166,35 @@ __global__ void doVisMap(
     }*/
     bool visible = false;
 
+    if (dist < CUTON) {
+        visible = true;
+    }
+
     //if (distN < DSTEPS && elev - 0.0001 < interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
     //if (distN < DSTEPS && elev - 0.01 * distR < interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
-    if (distN < DSTEPS && elev <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
-        Px2 myPx = myR.toPx2(MAXZOOM);
+    //if (distN < DSTEPS && elev - 0.0001 <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
+    if (distN < DSTEPS && elev - 0.00005 <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
+    //if (distN < DSTEPS && elev <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
+        Px2 myPx = myR.toPx2(zoom);
 
         float pxDist = float(ptPx - myPx);
 
         LL llStep = (ptL - myL) / pxDist;
 
         float distStep = dist / pxDist;
+        float distRStep = distR / pxDist;
 
         visible = true;
         int i = 10;
         while (dist > distNdist && i--) {
             dist -= distStep;
+            distR -= distRStep;
             ptL -= llStep;
             ptR = ptL.toRad();
 
             hgt = hgtQuery(HgtMap, hgtRect, ptL);
 
-            Vec3 ptP = (ERAD+hgt) * Vec3(ptR);
-            Vec3 losP = myP - ptP;
-
-            trueDist = float(losP);
-
-            float stepElev = myP * losP / (trueDist * (ERAD+myAlt));
+            float stepElev = abElev(myAlt, hgt, distR);
 
             if (stepElev < elev) {
                 visible = false;
@@ -307,72 +308,6 @@ extern "C" {
         return result;
     }
 
-    Image makeImage(LL myL, int myH, const uint64_t* HgtMapIn, Recti hgtRect) {
-        const short** HgtMap = nullptr;
-        float* AzEleD = nullptr;
-        unsigned char* Img_d = nullptr;
-        Image Img = {};
-
-        try {
-            cuErr(cudaMalloc(&HgtMap, hgtRect.width * hgtRect.height * sizeof(uint64_t)));
-            cuErr(cudaMemcpy(HgtMap, HgtMapIn, hgtRect.width * hgtRect.height * sizeof(uint64_t), cudaMemcpyHostToDevice));
-
-            LL myR = myL.toRad();
-            Vec3 myP = (ERAD + Query(HgtMap, hgtRect, myL) + myH) * Vec3(myR);
-
-            cuErr(cudaMalloc(&AzEleD, ANGSTEPS * DSTEPS * sizeof(float)));
-
-            doScape<<<dim3(ANGSTEPS/256, DSTEPS), dim3(256, 1)>>>(
-                HgtMap,
-                hgtRect,
-                AzEleD,
-                myP,
-                myH,
-                myL
-            );
-            cuErr(cudaGetLastError());
-
-            elevProject<<<dim3(ANGSTEPS/32), dim3(32)>>>(AzEleD);
-            cuErr(cudaGetLastError());
-
-            LL rngR = {config.CUTOFF / ERAD};
-            rngR.lon = -rngR.lat / cosf(myR.lat);
-
-            Img.rect.P = (myR + rngR).toPx2(config.MAXZOOM);
-            Img.rect.P.x &= ~255;
-            Img.rect.P.y &= ~255;
-            Img.rect.Q = (myR - rngR).toPx2(config.MAXZOOM);
-            Img.rect.Q.x |= 255;
-            Img.rect.Q.y |= 255;
-            Img.rect.Q.x += 1;
-            Img.rect.Q.y += 1;
-
-            cuErr(cudaMalloc(&Img_d, Img.wh() / 8));
-
-            doVisMap<VIS_IMAGE><<<dim3(Img.w()/256, Img.h()), dim3(256, 1)>>>(
-                HgtMap,
-                hgtRect,
-                AzEleD,
-                myP,
-                myH,
-                myL,
-                Img.rect.P,
-                Img_d
-            );
-            cuErr(cudaGetLastError());
-
-            Img.buf = malloc(Img.wh());
-            cuErr(cudaMemcpy(Img.buf, Img_d, Img.wh() / 8, cudaMemcpyDeviceToHost));
-        } catch (cuErrX error) {
-            Img.error = error;
-        }
-
-        cudaFree(HgtMap);
-        cudaFree(AzEleD);
-        cudaFree(Img_d);
-        return Img;
-    }
-
     TileStrip makeTileStrip(LL myL, int myH, const uint64_t* HgtMapIn, Recti hgtRect) {
         const short** HgtMap_d = nullptr;
         float* AzEleD_d = nullptr;
@@ -408,15 +343,20 @@ clk();
 
             PxRect irect;
 
-            irect.P = (myR + rngR).toPx2(config.MAXZOOM);
+            int zoom = 0;
+            while ((256 << zoom) < config.MAXWIDTH * PI / -rngR.lon) zoom++;
+            zoom--;
+
+            irect.P = (myR + rngR).toPx2(zoom);
             irect.P.x &= ~255;
             irect.P.y &= ~255;
-            irect.Q = (myR - rngR).toPx2(config.MAXZOOM);
+            irect.Q = (myR - rngR).toPx2(zoom);
             irect.Q.x |= 255;
             irect.Q.y |= 255;
             irect.Q ++;
+printf("Image: %d x %d, %d bytes, z: %d\n", irect.w(), irect.h(), (irect.wh() + 7) / 8, zoom);
 
-            TS.zsetup(irect, config.MAXZOOM);
+            TS.setup(irect, zoom);
             TS.nbytes = (TS.z[0].pretiles + 1) * 256 * 256 / 8;
 
             cuErr(cudaMalloc(&TSbuf_d, TS.nbytes));
@@ -429,12 +369,13 @@ clk();
                 myAlt,
                 myL,
                 irect.P,
-                TSbuf_d
+                TSbuf_d,
+                zoom
             );
             cuErr(cudaGetLastError());
 clk("doVisMap");
 
-            for (int z = config.MAXZOOM; z > 0; z--) {
+            for (int z = zoom; z > 0; z--) {
 //printf("z%d %d %d\n", z, t, TS.zoomrect[z].wh());
                 // each thread will produce 32x1 pixels
                 // so width of 8 will sweep the whole strip
@@ -467,7 +408,6 @@ clk("unzoom");
     void Init(Config c) {
         cudaMemcpyToSymbol(CUTOFF, &c.CUTOFF, sizeof(CUTOFF));
         cudaMemcpyToSymbol(CUTON, &c.CUTON, sizeof(CUTON));
-        cudaMemcpyToSymbol(MAXZOOM, &c.MAXZOOM, sizeof(MAXZOOM));
         float dstep = 2 * (c.CUTOFF - c.CUTON) / (DSTEPS * (DSTEPS - 1));
         cudaMemcpyToSymbol(DSTEP, &dstep, sizeof(DSTEP));
         config = c;

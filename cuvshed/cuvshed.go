@@ -3,11 +3,6 @@ package cuvshed
 import (
     . "vshed/conf"
     "vshed/latlon"
-    "image"
-    "vshed/img1b"
-    "image/color"
-    "log"
-    //"time"
     "fmt"
     "vshed/tiler"
     "errors"
@@ -20,41 +15,10 @@ import (
 #cgo LDFLAGS: -L../ -lcuvshed
 
 void Init(Config c);
-Image makeImage(LL ll, int, uint64_t* Hgt, Recti hgtRect);
 TileStrip makeTileStrip(LL myL, int myH, const uint64_t* HgtMapIn, Recti hgtRect);
 void stopprof();
 */
 import "C"
-
-func Image(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) *img1b.Image {
-    cimg := C.makeImage(
-        C.LL{C.float(ll.Lat), C.float(ll.Lon)},
-        C.int(myH),
-        (*C.ulong)(&hgtmap[0]),
-        C.Recti{
-            C.LLi{C.int(rect.Lat), C.int(rect.Lon)},
-            C.int(rect.Width),
-            C.int(rect.Height),
-        },
-    )
-    if (cimg.error.msg != nil) {
-        log.Println("CUDA error:", C.GoString(cimg.error.msg), cimg.error.line)
-        return nil
-    }
-    cr := cimg.rect;
-    buf := C.GoBytes(cimg.buf, (cr.Q.x - cr.P.x) * (cr.Q.y - cr.P.y) / 8)
-    C.free(cimg.buf)
-    return &img1b.Image{
-        Pix: buf,
-        Stride: int(cr.Q.x - cr.P.x) / 8,
-        Rect: image.Rect(int(cr.P.x), int(cr.P.y), int(cr.Q.x), int(cr.Q.y)),
-        //Rect: image.Rect(0, 0, int(cr.width), int(cr.height)),
-        Palette: color.Palette{
-            color.Black,
-            color.White,
-        },
-    }
-}
 
 func TileStrip(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) (*tiler.Strip, error) {
     cTS := C.makeTileStrip(
@@ -70,8 +34,9 @@ func TileStrip(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) (*tile
     if (cTS.error.msg != nil) {
         return nil, errors.New(fmt.Sprintf("CUDA error: %s in %s:%d", C.GoString(cTS.error.msg), C.GoString(cTS.error.file), cTS.error.line))
     }
-    sz := make([]tiler.StripZoom, MAXZOOM + 1)
-    for z:=0; z<=MAXZOOM; z++ {
+    maxzoom := int(cTS.zoom);
+    sz := make([]tiler.StripZoom, maxzoom + 1)
+    for z:=0; z<=maxzoom; z++ {
         cz := cTS.z[z]
         sz[z] = tiler.StripZoom{
             Rect: tiler.Rect{
@@ -95,6 +60,6 @@ func init() {
     C.Init(C.Config{
         CUTOFF: CUTOFF,
         CUTON: CUTON,
-        MAXZOOM: MAXZOOM,
+        MAXWIDTH: MAXWIDTH,
     })
 }
