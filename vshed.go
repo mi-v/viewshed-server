@@ -61,10 +61,20 @@ func main() {
         }
         ll := latlon.LL{lat, lon}.Wrap()
 
+        obsAh64, errAh := strconv.ParseInt(r.URL.Query().Get("ah"), 10, 32)
+        obsBh64, errBh := strconv.ParseInt(r.URL.Query().Get("bh"), 10, 32)
+        obsAh, obsBh := int(obsAh64), int(obsBh64)
+        if errAh != nil || errBh != nil {
+            http.Error(w, "Invalid parameters", 400)
+            return
+        }
+
         tilepath := fmt.Sprintf(
-            "%+08.4f,%+09.4f",
+            "%+08.4f,%+09.4f,%dah,%dbh",
             lat,
             lon,
+            obsAh,
+            obsBh,
         )
         tiledir := TILEDIR + "/" + tilepath
 
@@ -97,7 +107,7 @@ func main() {
         fmt.Println("GetGrid: ", time.Since(t), "\n")
 
         t = time.Now()
-        ts, err := cuvshed.TileStrip(ll, 2, grid.Map, grid.Recti)
+        ts, err := cuvshed.TileStrip(ll, obsAh, obsBh, grid.Map, grid.Recti)
         grid.Free()
         if err != nil {
             log.Println(err)

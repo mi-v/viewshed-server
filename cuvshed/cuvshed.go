@@ -15,15 +15,16 @@ import (
 #cgo LDFLAGS: -L../ -lcuvshed
 
 void Init(Config c);
-TileStrip makeTileStrip(LL myL, int myH, const uint64_t* HgtMapIn, Recti hgtRect);
+TileStrip makeTileStrip(LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect);
 void stopprof();
 */
 import "C"
 
-func TileStrip(ll latlon.LL, myH int, hgtmap []uint64, rect latlon.Recti) (*tiler.Strip, error) {
+func TileStrip(ll latlon.LL, myH int, theirH int, hgtmap []uint64, rect latlon.Recti) (*tiler.Strip, error) {
     cTS := C.makeTileStrip(
         C.LL{C.float(ll.Lat), C.float(ll.Lon)},
         C.int(myH),
+        C.int(theirH),
         (*C.ulong)(&hgtmap[0]),
         C.Recti{
             C.LLi{C.int(rect.Lat), C.int(rect.Lon)},

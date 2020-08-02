@@ -77,7 +77,7 @@ __global__ void Query(const short** __restrict__ HgtMap, Recti rect, LL ll, floa
     *result = hgtQuery(HgtMap, rect, ll);
 }
 
-__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, Vec3 myP, float myAlt, LL myL)
+__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, float myAlt, LL myL)
 {
     int az = blockIdx.x * blockDim.x + threadIdx.x;
     int distN = blockIdx.y * blockDim.y + threadIdx.y;
@@ -119,9 +119,9 @@ __global__ void doVisMap(
     const short** __restrict__ HgtMap,
     Recti hgtRect,
     const float* __restrict__ AzEleD,
-    Vec3 myP,
-    float myAlt,
     LL myL,
+    float myAlt,
+    float theirH,
     Px2 pxBase,
     unsigned char* __restrict__ visMap,
     int zoom
@@ -141,7 +141,7 @@ __global__ void doVisMap(
     LL myR = myL.toRad();
     float distR = seaDistR(myR, ptR);
 
-    float hgt = hgtQuery(HgtMap, hgtRect, ptL);
+    float hgt = hgtQuery(HgtMap, hgtRect, ptL) + theirH;
 
     float elev = abElev(myAlt, hgt, distR);
 
@@ -157,24 +157,13 @@ __global__ void doVisMap(
     float azf = modff(ANGSTEPS * azR / (2 * PI), &azi);
     int az = azi;
 
-    //visMap[visMapOffset] = 0;
-
-    //if (distN >= DSTEPS) {
-    /*if (__all_sync(~0, distN >= DSTEPS)) {
-        //visMap[visMapOffset] = 1;
-        return;
-    }*/
     bool visible = false;
 
     if (dist < CUTON) {
         visible = true;
     }
 
-    //if (distN < DSTEPS && elev - 0.0001 < interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
-    //if (distN < DSTEPS && elev - 0.01 * distR < interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
-    //if (distN < DSTEPS && elev - 0.0001 <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
     if (distN < DSTEPS && elev - 0.00005 <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
-    //if (distN < DSTEPS && elev <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
         Px2 myPx = myR.toPx2(zoom);
 
         float pxDist = float(ptPx - myPx);
@@ -222,9 +211,8 @@ __global__ void doVisMap(
     const short** __restrict__ HgtMap,
     Recti hgtRect,
     const float* __restrict__ AzEleD,
-    Vec3 myP,
-    float myAlt,
     LL myL,
+    float myAlt,
     Px2 pxBase,
     unsigned char* __restrict__ visMap
 );
@@ -233,9 +221,8 @@ template __global__ void doVisMap<VIS_TILES>(
     const short** __restrict__ HgtMap,
     Recti hgtRect,
     const float* __restrict__ AzEleD,
-    Vec3 myP,
-    float myAlt,
     LL myL,
+    float myAlt,
     Px2 pxBase,
     unsigned char* __restrict__ visMap
 );*/
@@ -308,7 +295,7 @@ extern "C" {
         return result;
     }
 
-    TileStrip makeTileStrip(LL myL, int myH, const uint64_t* HgtMapIn, Recti hgtRect) {
+    TileStrip makeTileStrip(LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect) {
         const short** HgtMap_d = nullptr;
         float* AzEleD_d = nullptr;
         unsigned char* TSbuf_d = nullptr;
@@ -321,7 +308,6 @@ clk();
 
             float myAlt = Query(HgtMap_d, hgtRect, myL) + myH;
             LL myR = myL.toRad();
-            Vec3 myP = (ERAD + myAlt) * Vec3(myR);
 
             cuErr(cudaMalloc(&AzEleD_d, ANGSTEPS * DSTEPS * sizeof(float)));
 
@@ -329,7 +315,6 @@ clk();
                 HgtMap_d,
                 hgtRect,
                 AzEleD_d,
-                myP,
                 myAlt,
                 myL
             );
@@ -365,9 +350,9 @@ printf("Image: %d x %d, %d bytes, z: %d\n", irect.w(), irect.h(), (irect.wh() + 
                 HgtMap_d,
                 hgtRect,
                 AzEleD_d,
-                myP,
-                myAlt,
                 myL,
+                myAlt,
+                theirH,
                 irect.P,
                 TSbuf_d,
                 zoom
