@@ -103,7 +103,7 @@ __global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float*
 __global__ void elevProject(float* AzEleD)
 {
     int az = blockIdx.x * blockDim.x + threadIdx.x;
-    float elev = 1;
+    float elev = AzEleD[ANGSTEPS + az];
     for (int distN = 1; distN < DSTEPS; distN++) {
         int ofs = distN * ANGSTEPS + az;
         if (AzEleD[ofs] > elev) {
