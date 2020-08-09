@@ -5,18 +5,19 @@ import (
     "log"
     "os"
     "math"
-    "sort"
     "errors"
+    "container/list"
     "vshed/cuhgt"
     "vshed/latlon"
     . "vshed/conf"
 )
 
 type cacheRecord struct {
-    ptr uint64
+    slot int
     users int
-    op int
+    ptr uint64
     ll latlon.LLi
+    le *list.Element
 }
 
 type request struct {
@@ -27,7 +28,8 @@ type request struct {
 
 type HgtMgr struct {
     hgtdir string
-    cache map[latlon.LLi]*cacheRecord
+    cache list.List
+    cacheMap map[latlon.LLi]*cacheRecord
     rq chan request
     free chan *Grid
     opcount int
@@ -55,10 +57,16 @@ func New(dir string) (m *HgtMgr, err error) {
 
     m = &HgtMgr{
         hgtdir: dir,
-        cache: make(map[latlon.LLi]*cacheRecord),
         rq: make(chan request),
         free: make(chan *Grid),
+        cacheMap: make(map[latlon.LLi]*cacheRecord),
     }
+
+    for i:=0; i < HGTSLOTS; i++ {
+        m.cache.PushFront(&cacheRecord{slot: i})
+        m.cache.Front().Value.(*cacheRecord).le = m.cache.Front()
+    }
+
     go m.run()
 
     return
@@ -88,13 +96,6 @@ func (g *Grid) Free() {
     g.mgr.free <- g
 }
 
-func (m *HgtMgr) Query(ll latlon.LL) float64 {
-    g := m.GetGrid(latlon.Recti{LLi: ll.Floor().Int(), Width: 1, Height: 1}, []bool{true})
-    hgt := cuhgt.Query(g.Map[0], ll)
-    g.Free()
-    return hgt
-}
-
 func (m *HgtMgr) run() {
     for {
         select {
@@ -111,21 +112,40 @@ func (m *HgtMgr) run() {
                         return
                     }
                     m.cacheRq++
-                    cr, ok := m.cache[ll]
+                    cr, ok := m.cacheMap[ll]
                     if !ok {
-                        ptr := cuhgt.Open(ll, m.hgtdir)
-                        if ptr == 0 {
-                            g.mask[len(g.Map)] = false;
-                            g.Map = append(g.Map, 0)
-                            return
-                        }
-                        cr = &cacheRecord{ptr: ptr, ll: ll}
-                        m.cache[ll] = cr
                         m.cacheMiss++
+                        for le := m.cache.Back(); le != nil; le = le.Prev() {
+                            if le.Value.(*cacheRecord).users > 0 {
+                                continue
+                            }
+                            cr = le.Value.(*cacheRecord)
+                            ptr := cuhgt.Fetch(ll, m.hgtdir, cr.slot)
+                            if ptr == 0 {
+                                m.cacheMap[ll] = nil
+                                g.mask[len(g.Map)] = false;
+                                g.Map = append(g.Map, 0)
+                                return
+                            } else {
+                                delete(m.cacheMap, cr.ll)
+                                cr.ll = ll
+                                cr.ptr = ptr
+                                m.cacheMap[ll] = cr
+                            }
+                            break
+                        }
+                        if cr == nil {
+                            log.Fatal("cache overflow!")
+                        }
+                    }
+                    if cr == nil {
+                        g.mask[len(g.Map)] = false;
+                        g.Map = append(g.Map, 0)
+                        return
                     }
                     cr.users++
-                    cr.op = m.opcount
                     g.Map = append(g.Map, cr.ptr)
+                    m.cache.MoveToFront(cr.le)
                 })
                 /*for k, v := range m.cache {
                     fmt.Println(k, *v)
@@ -135,26 +155,6 @@ func (m *HgtMgr) run() {
 if m.opcount & 63 == 0 {
     fmt.Printf("Cache HIT: %.1f%%\n", float64(m.cacheRq - m.cacheMiss) * 100 / float64(m.cacheRq))
 }
-                if len(m.cache) > HGTCACHECAP {
-                    cch := make([]*cacheRecord, len(m.cache))
-                    i := 0
-                    for _, r := range(m.cache) {
-                        cch[i] = r
-                        i++
-                    }
-                    sort.Slice(cch, func (i, j int) bool {return cch[i].op < cch[j].op})
-                    rm := len(cch) - HGTCACHECAP * 8 / 10
-                    for _, r := range(cch) {
-                        if r.users == 0 {
-                            cuhgt.Free(r.ptr)
-                            delete(m.cache, r.ll)
-                            rm--
-                            if rm == 0 {
-                                break
-                            }
-                        }
-                    }
-                }
             case g := <-m.free:
                 g.mgr = nil
                 i := -1
@@ -163,7 +163,7 @@ if m.opcount & 63 == 0 {
                     if g.mask[i] == false {
                         return
                     }
-                    cr, ok := m.cache[ll]
+                    cr, ok := m.cacheMap[ll]
                     if ok {
                         cr.users--
                     } else {

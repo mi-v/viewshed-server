@@ -4,22 +4,22 @@ import (
     "os"
     "fmt"
     "vshed/latlon"
+    . "vshed/conf"
     "log"
 )
 
 // #include <stdint.h>
 // #include <stdlib.h>
 // #include "cuhgt.h"
-// UploadResult upload(int fd);
-// void freeHgt(uint64_t ptr);
-// float Query(uint64_t Hgt, float lat, float lon);
-// void Init();
+// UploadResult upload(int fd, int slot);
+// uint64_t cuhgtInit(int slots);
 // #cgo LDFLAGS: -L../ -lcuhgt
 import "C"
 
 const hgtFileSize = 1201 * 1201 * 2
+var hgtBase uint64
 
-func Open(ll latlon.LLi, dir string) (ptr uint64) {
+func Fetch(ll latlon.LLi, dir string, slot int) (ptr uint64) {
     hgtName := dir + "/" + mkHgtName(ll)
     hf, err := os.Open(hgtName)
     if (err != nil) {
@@ -31,24 +31,13 @@ func Open(ll latlon.LLi, dir string) (ptr uint64) {
         return
     }
 
-    cUR := C.upload(C.int(hf.Fd()))
+    cUR := C.upload(C.int(hf.Fd()), C.int(slot))
     if (cUR.error.msg != nil) {
         log.Fatalf("CUDA error: %d %s in %s:%d", cUR.error.code, C.GoString(cUR.error.msg), C.GoString(cUR.error.file), cUR.error.line)
         //log.Printf("CUDA error: %d %s in %s:%d", cUR.error.code, C.GoString(cUR.error.msg), C.GoString(cUR.error.file), cUR.error.line)
         return
     }
     return uint64(cUR.ptr)
-}
-
-func Free (ptr uint64) {
-    C.freeHgt(C.ulong(ptr))
-}
-
-func Query (ptr uint64, ll latlon.LL) float64 {
-    if ptr == 0 {
-        return 0
-    }
-    return float64(C.Query(C.ulong(ptr), C.float(ll.Lat), C.float(ll.Lon)))
 }
 
 func mkHgtName(ll latlon.LLi) string {
@@ -68,5 +57,5 @@ func mkHgtName(ll latlon.LLi) string {
 }
 
 func init() {
-    C.Init()
+    hgtBase = uint64(C.cuhgtInit(HGTSLOTS))
 }

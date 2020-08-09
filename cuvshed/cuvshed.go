@@ -15,14 +15,16 @@ import (
 #include "cuvshed.h"
 #cgo LDFLAGS: -L../ -lcuvshed
 
-void Init(Config c);
-TileStrip makeTileStrip(LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect);
+void cuvshedInit(Config c);
+TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect);
+uint64_t makeContext();
 void stopprof();
 */
 import "C"
 
-func TileStrip(ll latlon.LL, myH int, theirH int, hgtmap []uint64, rect latlon.Recti) (*tiler.Strip, error) {
+func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, hgtmap []uint64, rect latlon.Recti) (*tiler.Strip, error) {
     cTS := C.makeTileStrip(
+        C.ulong(ctx),
         C.LL{C.float(ll.Lat), C.float(ll.Lon)},
         C.int(myH),
         C.int(theirH),
@@ -53,14 +55,22 @@ func TileStrip(ll latlon.LL, myH int, theirH int, hgtmap []uint64, rect latlon.R
     TS := tiler.NewStrip(
         (*[1<<30]byte)(cTS.buf)[:cTS.nbytes:cTS.nbytes],
         sz,
-        func() {C.free(cTS.buf)},
+        nil,//func() {C.free(cTS.buf)},
     );
     //fmt.Println(cTS);
     return TS, nil
 }
 
+func MakeCtx() uint64 {
+    ctx := C.makeContext();
+    if ctx == 0 {
+        log.Fatal("could not create context")
+    }
+    return uint64(ctx)
+}
+
 func init() {
-    C.Init(C.Config{
+    C.cuvshedInit(C.Config{
         CUTOFF: CUTOFF,
         CUTON: CUTON,
         MAXWIDTH: MAXWIDTH,

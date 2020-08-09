@@ -15,6 +15,14 @@ enum visMapMode {
     VIS_TILES,
 };
 
+struct Context {
+    cudaStream_t stream;
+    const short** HgtMap;
+    float* AzEleD;
+    unsigned char* TSbuf;
+    unsigned char* TSbuf_h;
+};
+
 __constant__ float CUTOFF;
 __constant__ float CUTON;
 __constant__ float DSTEP;
@@ -286,34 +294,35 @@ void inline clk(const char* str, cudaStream_t cus) {
 }
 
 extern "C" {
-    float Query(const short** HgtMap, Recti rect, LL ll) {
-        float* d_result;
+    float Query(uint64_t ictx, Recti rect, LL ll, float* buf) {
+        Context* ctx = (Context*)ictx;
+        cudaStream_t cus = ctx->stream;
+
+        //float* d_result;
         float result;
-        cudaMalloc((void**)&d_result, sizeof(float));
-        Query<<<1, 1>>>(HgtMap, rect, ll, d_result);
-        int r = cudaMemcpy(&result, d_result, sizeof(float), cudaMemcpyDeviceToHost);
-        cudaFree(d_result);
+        //cudaMalloc((void**)&d_result, sizeof(float));
+        //Query<<<1, 1, 0, cus>>>(ctx->HgtMap, rect, ll, d_result);
+        Query<<<1, 1, 0, cus>>>(ctx->HgtMap, rect, ll, buf);
+        //cudaMemcpyAsync(&result, d_result, sizeof(float), cudaMemcpyDeviceToHost, cus);
+        cudaMemcpyAsync(&result, buf, sizeof(float), cudaMemcpyDeviceToHost, cus);
+        //cudaFree(d_result);
         return result;
     }
 
-    TileStrip makeTileStrip(LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect) {
-        const short** HgtMap_d = nullptr;
-        float* AzEleD_d = nullptr;
-        unsigned char* TSbuf_d = nullptr;
+    TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect) {
+        Context* ctx = (Context*)ictx;
+        const short** HgtMap_d = ctx->HgtMap;
+        float* AzEleD_d = ctx->AzEleD;
+        unsigned char* TSbuf_d = ctx->TSbuf;
         TileStrip TS = {nullptr};
-        cudaStream_t cus=0;
-
-        cudaStreamCreate(&cus);
+        cudaStream_t cus = ctx->stream;
 
         try {
 clk(nullptr, cus);
-            cuErr(cudaMalloc(&HgtMap_d, hgtRect.width * hgtRect.height * sizeof(uint64_t)));
             cuErr(cudaMemcpyAsync(HgtMap_d, HgtMapIn, hgtRect.width * hgtRect.height * sizeof(uint64_t), cudaMemcpyHostToDevice, cus));
 
-            float myAlt = Query(HgtMap_d, hgtRect, myL) + myH;
+            float myAlt = Query(ictx, hgtRect, myL, AzEleD_d) + myH;
             LL myR = myL.toRad();
-
-            cuErr(cudaMalloc(&AzEleD_d, ANGSTEPS * DSTEPS * sizeof(float)));
 
             doScape<<<dim3(ANGSTEPS/32, DSTEPS/32), dim3(32, 32), 0, cus>>>(
                 HgtMap_d,
@@ -348,8 +357,6 @@ printf("Image: %d x %d, %d bytes, z: %d  lat=%f  lon=%f\n", irect.w(), irect.h()
             TS.setup(irect, zoom);
             TS.nbytes = (TS.z[0].pretiles + 1) * 256 * 256 / 8;
 
-            cuErr(cudaMalloc(&TSbuf_d, TS.nbytes));
-
             doVisMap<VIS_TILES><<<dim3(irect.w()/32, irect.h()/32), dim3(32, 32), 0, cus>>>(
                 HgtMap_d,
                 hgtRect,
@@ -377,22 +384,54 @@ clk("doVisMap", cus);
             }
 clk("unzoom", cus);
 
-            TS.buf = malloc(TS.nbytes);
+            //TS.buf = malloc(TS.nbytes);
+            //cuErr(cudaMemcpyAsync(TS.buf, TSbuf_d, TS.nbytes, cudaMemcpyDeviceToHost, cus));
+printf("nby: %d\n", TS.nbytes);
+            TS.buf = ctx->TSbuf_h;
             cuErr(cudaMemcpyAsync(TS.buf, TSbuf_d, TS.nbytes, cudaMemcpyDeviceToHost, cus));
         } catch (cuErrX error) {
-            free(TS.buf);
+            //free(TS.buf);
             TS.error = error;
         }
 
         cudaStreamSynchronize(cus);
-        cudaStreamDestroy(cus);
-        cudaFree(HgtMap_d);
-        cudaFree(AzEleD_d);
-        cudaFree(TSbuf_d);
         return TS;
     }
 
-    void Init(Config c) {
+    uint64_t makeContext() {
+        Context* ctx = new Context{};
+        try {
+            cuErr(cudaStreamCreate(&ctx->stream));
+            cuErr(cudaMalloc(&ctx->HgtMap, ceilf(2 * config.CUTOFF / CSLAT + 1) * ceilf(2 * config.CUTOFF / (CSLAT * cosdf(85.0f)) + 1) * sizeof(uint64_t)));
+            cuErr(cudaMalloc(&ctx->AzEleD, ANGSTEPS * DSTEPS * sizeof(float)));
+
+            size_t TSbytes = 0;
+            int width = config.MAXWIDTH;
+            int height = (width * 11 + 9)/ 10;
+            do {
+                size_t zoombytes = 0;
+                zoombytes = (width | 255) + 1 + 256; // rounded to tiles
+                zoombytes *= (height | 255) + 1 + 256;
+                zoombytes /= 8; // 1 bpp
+                TSbytes += zoombytes;
+                width = (width + 1) / 2;
+                height = (height + 1) / 2;
+            } while (height > 1);
+printf("nby: %d\n", TSbytes);
+            cuErr(cudaMalloc(&ctx->TSbuf, TSbytes));
+            cudaHostAlloc(&ctx->TSbuf_h, TSbytes, 0);
+        } catch (cuErrX error) {
+            cudaStreamDestroy(ctx->stream);
+            cudaFree(ctx->HgtMap);
+            cudaFree(ctx->AzEleD);
+            cudaFree(ctx->TSbuf);
+            cudaFreeHost(ctx->TSbuf_h);
+            ctx = nullptr;
+        }
+        return (uint64_t)ctx;
+    }
+
+    void cuvshedInit(Config c) {
         cudaMemcpyToSymbol(CUTOFF, &c.CUTOFF, sizeof(CUTOFF));
         cudaMemcpyToSymbol(CUTON, &c.CUTON, sizeof(CUTON));
         float dstep = 2 * (c.CUTOFF - c.CUTON) / (DSTEPS * (DSTEPS - 1));
