@@ -1,6 +1,9 @@
 #include <stdint.h>
 #include <stdio.h>
-//#include <time.h>
+#include <time.h>
+#include "cuhgt.h"
+
+#define cuErr(call)  {cudaError_t err; if (cudaSuccess != (err=(call))) throw cuErrX{err, cudaGetErrorString(err), __FILE__, __LINE__};}
 
 __global__ void byteswap16(int32_t* Hgt) {
     int col = blockIdx.x*blockDim.x+threadIdx.x;
@@ -10,6 +13,15 @@ __global__ void byteswap16(int32_t* Hgt) {
         int ofs = row * 640 + col;
         Hgt[ofs] = ((Hgt[ofs] >> 8) & 0x00ff00ff) | ((Hgt[ofs] << 8) & 0xff00ff00);
     }
+}
+
+cudaStream_t cus=0;
+
+void inline clk(const char* str = nullptr) {
+    static clock_t t = 0;
+    cudaStreamSynchronize(cus);
+    if (str) printf("%s: %f\n", str, (float)(clock() - t) / CLOCKS_PER_SEC);
+    t = clock();
 }
 
 __global__ void Query(const short* __restrict__ Hgt, float lat, float lon, float* result) {
@@ -37,16 +49,30 @@ __global__ void Query(const short* __restrict__ Hgt, float lat, float lon, float
 }
 
 extern "C" {
-    uint64_t upload(short* Hgt) {
+    UploadResult upload(short* Hgt) {
         short* ptr;
-        cudaMalloc((void**)&ptr, 1280 * 1201 * sizeof(short));
-        cudaMemcpy2D(ptr, 2560, Hgt, 1201 * sizeof(short), 1201 * sizeof(short), 1201, cudaMemcpyHostToDevice);
-        byteswap16<<<dim3(19, 38), dim3(32, 32)>>>((int32_t*)ptr);
-        return (uint64_t)ptr;
+        UploadResult Res = {0};
+clk();
+        try {
+            cuErr(cudaMalloc((void**)&ptr, 1280 * 1201 * sizeof(short)));
+            cuErr(cudaMemcpy2DAsync(ptr, 2560, Hgt, 1201 * sizeof(short), 1201 * sizeof(short), 1201, cudaMemcpyHostToDevice, cus));
+            byteswap16<<<dim3(19, 38), dim3(32, 32), 0, cus>>>((int32_t*)ptr);
+            cuErr(cudaGetLastError());
+            Res.ptr = (uint64_t)ptr;
+        } catch (cuErrX error) {
+            Res.error = error;
+        }
+        cudaStreamSynchronize(cus);
+clk("Upload");
+        return Res;
     }
 
     void freeHgt(uint64_t Hgt_d) {
         cudaFree((void*)Hgt_d);
+    }
+
+    void Init() {
+        cudaStreamCreate(&cus);
     }
 
     float Query(uint64_t Hgt, float lat, float lon) {

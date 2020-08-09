@@ -16,6 +16,7 @@ typedef struct {
 } Config;
 
 typedef struct cuErrX {
+    int code;
     const char* msg;
     const char* file;
     int line;

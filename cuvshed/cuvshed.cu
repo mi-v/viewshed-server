@@ -7,7 +7,7 @@
 #define sindf(a) sinpif((a) / 180)
 #define cosdf(a) cospif((a) / 180)
 
-#define cuErr(call)  {if (cudaSuccess != (call)) throw cuErrX{cudaGetErrorString(cudaGetLastError()), __FILE__, __LINE__};}
+#define cuErr(call)  {cudaError_t err; if (cudaSuccess != (err=(call))) throw cuErrX{err, cudaGetErrorString(err), __FILE__, __LINE__};}
 #define bswap32(i)  (((i & 0xFF) << 24) | ((i & 0xFF00) << 8) | ((i & 0xFF0000) >> 8) | ((i & 0xFF000000) >> 24))
 
 enum visMapMode {
@@ -150,7 +150,7 @@ __global__ void doVisMap(
     float distNdist = CUTON + DSTEP * distN * (distN + 1) / 2;
 
     float azR = atan2f(sinf(ptR.lon - myR.lon) * cosf(ptR.lat), cosf(myR.lat) * sinf(ptR.lat) - sinf(myR.lat) * cosf(ptR.lat) * cosf(ptR.lon - myR.lon));
-    if (azR < 0) {
+    while (azR < 0) {
         azR += 2 * PI;
     }
     float azi;
@@ -163,7 +163,7 @@ __global__ void doVisMap(
         visible = true;
     }
 
-    if (distN < DSTEPS && elev - 0.00005 <= interp(AzEleD[distN * ANGSTEPS + az], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
+    if (distN >= 0 && distN < DSTEPS && elev - 0.00005 <= interp(AzEleD[distN * ANGSTEPS + az % ANGSTEPS], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
         Px2 myPx = myR.toPx2(zoom);
 
         float pxDist = float(ptPx - myPx);
@@ -277,11 +277,12 @@ __global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[
     DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = bswap32(out);
 }
 
-void inline clk(const char* str = nullptr) {
-static clock_t t = 0;
-cudaDeviceSynchronize();
-if (str) printf("%s: %f\n", str, (float)(clock() - t) / CLOCKS_PER_SEC);
-t = clock();
+void inline clk(const char* str, cudaStream_t cus) {
+    return;
+    static clock_t t = 0;
+    cudaStreamSynchronize(cus);
+    if (str) printf("%s: %f\n", str, (float)(clock() - t) / CLOCKS_PER_SEC);
+    t = clock();
 }
 
 extern "C" {
@@ -300,18 +301,21 @@ extern "C" {
         float* AzEleD_d = nullptr;
         unsigned char* TSbuf_d = nullptr;
         TileStrip TS = {nullptr};
+        cudaStream_t cus=0;
+
+        cudaStreamCreate(&cus);
 
         try {
-clk();
+clk(nullptr, cus);
             cuErr(cudaMalloc(&HgtMap_d, hgtRect.width * hgtRect.height * sizeof(uint64_t)));
-            cuErr(cudaMemcpy(HgtMap_d, HgtMapIn, hgtRect.width * hgtRect.height * sizeof(uint64_t), cudaMemcpyHostToDevice));
+            cuErr(cudaMemcpyAsync(HgtMap_d, HgtMapIn, hgtRect.width * hgtRect.height * sizeof(uint64_t), cudaMemcpyHostToDevice, cus));
 
             float myAlt = Query(HgtMap_d, hgtRect, myL) + myH;
             LL myR = myL.toRad();
 
             cuErr(cudaMalloc(&AzEleD_d, ANGSTEPS * DSTEPS * sizeof(float)));
 
-            doScape<<<dim3(ANGSTEPS/32, DSTEPS/32), dim3(32, 32)>>>(
+            doScape<<<dim3(ANGSTEPS/32, DSTEPS/32), dim3(32, 32), 0, cus>>>(
                 HgtMap_d,
                 hgtRect,
                 AzEleD_d,
@@ -320,7 +324,7 @@ clk();
             );
             cuErr(cudaGetLastError());
 
-            elevProject<<<dim3(ANGSTEPS/256), dim3(256)>>>(AzEleD_d);
+            elevProject<<<dim3(ANGSTEPS/256), dim3(256), 0, cus>>>(AzEleD_d);
             cuErr(cudaGetLastError());
 
             LL rngR = {config.CUTOFF / ERAD};
@@ -339,14 +343,14 @@ clk();
             irect.Q.x |= 255;
             irect.Q.y |= 255;
             irect.Q ++;
-printf("Image: %d x %d, %d bytes, z: %d\n", irect.w(), irect.h(), (irect.wh() + 7) / 8, zoom);
+printf("Image: %d x %d, %d bytes, z: %d  lat=%f  lon=%f\n", irect.w(), irect.h(), (irect.wh() + 7) / 8, zoom, myL.lat, myL.lon);
 
             TS.setup(irect, zoom);
             TS.nbytes = (TS.z[0].pretiles + 1) * 256 * 256 / 8;
 
             cuErr(cudaMalloc(&TSbuf_d, TS.nbytes));
 
-            doVisMap<VIS_TILES><<<dim3(irect.w()/32, irect.h()/32), dim3(32, 32)>>>(
+            doVisMap<VIS_TILES><<<dim3(irect.w()/32, irect.h()/32), dim3(32, 32), 0, cus>>>(
                 HgtMap_d,
                 hgtRect,
                 AzEleD_d,
@@ -358,32 +362,30 @@ printf("Image: %d x %d, %d bytes, z: %d\n", irect.w(), irect.h(), (irect.wh() + 
                 zoom
             );
             cuErr(cudaGetLastError());
-clk("doVisMap");
+clk("doVisMap", cus);
 
             for (int z = zoom; z > 0; z--) {
-//printf("z%d %d %d\n", z, t, TS.zoomrect[z].wh());
                 // each thread will produce 32x1 pixels
                 // so width of 8 will sweep the whole strip
-                unzoomTiles<<<dim3(1, TS.z[z-1].ntiles * 256 / 128), dim3(8, 128)>>>(
-//printf("%d %p %p\n", __LINE__, reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + t, reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + t + TS.zoomrect[z].wh());
-                //unzoomTiles<<<dim3(1, 1), dim3(1, 1)>>>(
+                unzoomTiles<<<dim3(1, TS.z[z-1].ntiles * 256 / 128), dim3(8, 128), 0, cus>>>(
                     reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + TS.z[z].pretiles, // src tiles ptr cast to array[] of bit tiles of uint32 (hence the /32)
                     reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + TS.z[z-1].pretiles, // dst tiles ptr
                     TS.z[z].rect,
                     TS.z[z-1].rect
                 );
-                //cuErr(cudaDeviceSynchronize());
                 cuErr(cudaGetLastError());
             }
-clk("unzoom");
+clk("unzoom", cus);
 
             TS.buf = malloc(TS.nbytes);
-            cuErr(cudaMemcpy(TS.buf, TSbuf_d, TS.nbytes, cudaMemcpyDeviceToHost));
+            cuErr(cudaMemcpyAsync(TS.buf, TSbuf_d, TS.nbytes, cudaMemcpyDeviceToHost, cus));
         } catch (cuErrX error) {
             free(TS.buf);
             TS.error = error;
         }
 
+        cudaStreamSynchronize(cus);
+        cudaStreamDestroy(cus);
         cudaFree(HgtMap_d);
         cudaFree(AzEleD_d);
         cudaFree(TSbuf_d);

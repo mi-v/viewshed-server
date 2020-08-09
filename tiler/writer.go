@@ -5,7 +5,6 @@ import (
     "log"
     "os"
     "fmt"
-    //"io/ioutil"
     "image"
     "image/color"
     "vshed/img1b"
@@ -41,6 +40,8 @@ func init() {
                 //CompressionLevel: png.BestSpeed,
             }
             for task := range tasks {
+task.report.Done()
+continue
                 dir := fmt.Sprintf("%s/z%d/%d", task.dir, task.Z, task.X)
                 fn := fmt.Sprintf("%s/%d.png", dir, task.Y)
                 fd, err := os.Create(fn)
@@ -62,7 +63,6 @@ func init() {
                         color.Transparent,
                     },
                 }
-                //e.Encode(ioutil.Discard, img)
                 e.Encode(fd, img)
                 fd.Close()
                 task.report.Done()

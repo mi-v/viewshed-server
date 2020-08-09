@@ -31,6 +31,8 @@ type HgtMgr struct {
     rq chan request
     free chan *Grid
     opcount int
+    cacheMiss int
+    cacheRq int
 }
 
 type Grid struct {
@@ -108,6 +110,7 @@ func (m *HgtMgr) run() {
                         g.Map = append(g.Map, 0)
                         return
                     }
+                    m.cacheRq++
                     cr, ok := m.cache[ll]
                     if !ok {
                         ptr := cuhgt.Open(ll, m.hgtdir)
@@ -118,16 +121,20 @@ func (m *HgtMgr) run() {
                         }
                         cr = &cacheRecord{ptr: ptr, ll: ll}
                         m.cache[ll] = cr
+                        m.cacheMiss++
                     }
                     cr.users++
                     cr.op = m.opcount
                     g.Map = append(g.Map, cr.ptr)
                 })
-                for k, v := range m.cache {
+                /*for k, v := range m.cache {
                     fmt.Println(k, *v)
-                }
+                }*/
                 rq.replyto <- g
                 m.opcount++
+if m.opcount & 63 == 0 {
+    fmt.Printf("Cache HIT: %.1f%%\n", float64(m.cacheRq - m.cacheMiss) * 100 / float64(m.cacheRq))
+}
                 if len(m.cache) > HGTCACHECAP {
                     cch := make([]*cacheRecord, len(m.cache))
                     i := 0
@@ -163,7 +170,6 @@ func (m *HgtMgr) run() {
                         log.Println("Tile to free not in cache!", ll, g)
                     }
                 })
-                print("TODO: кеш доделать\n")
         }
     }
 }

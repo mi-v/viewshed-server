@@ -55,7 +55,7 @@ func main() {
         }
         lat, errlat := strconv.ParseFloat(qlat, 64)
         lon, errlon := strconv.ParseFloat(qlon, 64)
-        if errlat != nil || errlon != nil {
+        if errlat != nil || errlon != nil || lat > 85 || lat < -85 {
             http.Error(w, "Invalid parameters", 400)
             return
         }
@@ -104,7 +104,7 @@ func main() {
 
         t = time.Now()
         grid := hm.GetGridAround(ll)
-        fmt.Println("GetGrid: ", time.Since(t), "\n")
+        fmt.Println("GetGrid: ", time.Since(t))
 
         t = time.Now()
         ts, err := cuvshed.TileStrip(ll, obsAh, obsBh, grid.Map, grid.Recti)
@@ -114,7 +114,7 @@ func main() {
             http.Error(w, "Server error", 500)
             return
         }
-        fmt.Println("TileStrip: ", time.Since(t), "\n")
+        fmt.Println("TileStrip: ", time.Since(t))
 
         t = time.Now()
         tilemask := make([][]byte, ts.MaxZ()-7)
@@ -135,8 +135,9 @@ func main() {
         }
         wg.Wait()
         ts.Free()
-        fmt.Println("\nTile cutting: ", time.Since(t))
+        fmt.Println("Tile cutting: ", time.Since(t))
         response.Tilemask = tilemask
+
         response.Tilepath = tilepath
         response.Zlim = ts.MaxZ();
 

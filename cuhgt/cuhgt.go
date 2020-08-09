@@ -6,19 +6,24 @@ import (
     //"io/ioutil"
     //"unsafe"
     "vshed/latlon"
+    "log"
+    "time"
 )
 
 // #include <stdint.h>
 // #include <stdlib.h>
-// uint64_t upload(short* Hgt);
+// #include "cuhgt.h"
+// UploadResult upload(short* Hgt);
 // void freeHgt(uint64_t ptr);
 // float Query(uint64_t Hgt, float lat, float lon);
+// void Init();
 // #cgo LDFLAGS: -L../ -lcuhgt
 import "C"
 
 const hgtFileSize = 1201 * 1201 * 2
 
 func Open(ll latlon.LLi, dir string) (ptr uint64) {
+t := time.Now()
     hgtName := dir + "/" + mkHgtName(ll)
     hf, err := os.Open(hgtName)
     if (err != nil) {
@@ -38,11 +43,15 @@ func Open(ll latlon.LLi, dir string) (ptr uint64) {
     if (err != nil || n != hgtFileSize) {
         return
     }
+fmt.Println("Read: ", time.Since(t))
 
-    //ptr = uintptr(C.upload(unsafe.Pointer(&hgt[0])))
-    //ptr = uintptr(C.upload((*C.char)(&hgt[0])))
-    ptr = uint64(C.upload((*C.short)(cbuf)))
-    return
+    cUR := C.upload((*C.short)(cbuf))
+    if (cUR.error.msg != nil) {
+        log.Fatalf("CUDA error: %d %s in %s:%d", cUR.error.code, C.GoString(cUR.error.msg), C.GoString(cUR.error.file), cUR.error.line)
+        //log.Printf("CUDA error: %d %s in %s:%d", cUR.error.code, C.GoString(cUR.error.msg), C.GoString(cUR.error.file), cUR.error.line)
+        return
+    }
+    return uint64(cUR.ptr)
 }
 
 func Free (ptr uint64) {
@@ -70,4 +79,8 @@ func mkHgtName(ll latlon.LLi) string {
     }
 
     return fmt.Sprintf("%c%02d%c%03d.hgt", ns, ll.Lat, ew, ll.Lon)
+}
+
+func init() {
+    C.Init()
 }

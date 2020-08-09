@@ -6,6 +6,7 @@ import (
     "fmt"
     "vshed/tiler"
     "errors"
+    "log"
 )
 
 /*
@@ -33,6 +34,7 @@ func TileStrip(ll latlon.LL, myH int, theirH int, hgtmap []uint64, rect latlon.R
         },
     )
     if (cTS.error.msg != nil) {
+        log.Fatalf("CUDA error: %d %s in %s:%d", cTS.error.code, C.GoString(cTS.error.msg), C.GoString(cTS.error.file), cTS.error.line)
         return nil, errors.New(fmt.Sprintf("CUDA error: %s in %s:%d", C.GoString(cTS.error.msg), C.GoString(cTS.error.file), cTS.error.line))
     }
     maxzoom := int(cTS.zoom);
