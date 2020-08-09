@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
+#include <sys/mman.h>
+#include <cerrno>
 #include "cuhgt.h"
 
 #define cuErr(call)  {cudaError_t err; if (cudaSuccess != (err=(call))) throw cuErrX{err, cudaGetErrorString(err), __FILE__, __LINE__};}
@@ -49,20 +51,25 @@ __global__ void Query(const short* __restrict__ Hgt, float lat, float lon, float
 }
 
 extern "C" {
-    UploadResult upload(short* Hgt) {
-        short* ptr;
+    UploadResult upload(int fd) {
+        void* Hgt;
+        void* Hgt_d;
         UploadResult Res = {0};
 clk();
         try {
-            cuErr(cudaMalloc((void**)&ptr, 1280 * 1201 * sizeof(short)));
-            cuErr(cudaMemcpy2DAsync(ptr, 2560, Hgt, 1201 * sizeof(short), 1201 * sizeof(short), 1201, cudaMemcpyHostToDevice, cus));
-            byteswap16<<<dim3(19, 38), dim3(32, 32), 0, cus>>>((int32_t*)ptr);
+            Hgt = mmap(nullptr, HGTSIZE, PROT_READ, MAP_SHARED, fd, 0);
+            cuErr(cudaMalloc((void**)&Hgt_d, 1280 * 1201 * sizeof(short)));
+            cuErr(cudaMemcpy2DAsync(Hgt_d, 2560, Hgt, 1201 * sizeof(short), 1201 * sizeof(short), 1201, cudaMemcpyHostToDevice, cus));
+            byteswap16<<<dim3(19, 38), dim3(32, 32), 0, cus>>>((int32_t*)Hgt_d);
             cuErr(cudaGetLastError());
-            Res.ptr = (uint64_t)ptr;
+            Res.ptr = (uint64_t)Hgt_d;
+            cuErr(cudaStreamSynchronize(cus));
         } catch (cuErrX error) {
             Res.error = error;
         }
-        cudaStreamSynchronize(cus);
+        if (Hgt != MAP_FAILED) {
+            munmap(Hgt, HGTSIZE);
+        }
 clk("Upload");
         return Res;
     }
