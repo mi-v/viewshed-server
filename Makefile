@@ -2,9 +2,9 @@ NVCC=nvcc
 #NVCCFLAGS=-O3 -arch=sm_52 -m64 --ptxas-options=-v --compiler-options '-fPIC' --shared
 #NVCCFLAGS=-m64 --ptxas-options=-v --compiler-options '-fPIC' --shared
 NVCCFLAGS=-m64 --resource-usage --compiler-options '-fPIC' --shared
-VPATH=cuhgt cuvshed
+VPATH=cuhgt cuvshed cuinit
 
-cuda: libcuhgt.so libcuvshed.so
+cuda: libcuhgt.so libcuvshed.so libcuinit.so
 
 lib%.so: %.cu %.h
 	$(NVCC) $(NVCCFLAGS) -o $@ $<

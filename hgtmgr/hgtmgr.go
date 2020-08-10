@@ -39,6 +39,7 @@ type HgtMgr struct {
 
 type Grid struct {
     Map []uint64
+    EvtReady uint64
     latlon.Recti
     mgr *HgtMgr
     mask []bool
@@ -106,6 +107,7 @@ func (m *HgtMgr) run() {
                     mgr: m,
                     mask: rq.mask,
                 }
+                prepq := make([]uint64, 0, rq.Width * rq.Height)
                 g.Recti.Apply(func (ll latlon.LLi) {
                     if rq.mask[len(g.Map)] == false {
                         g.Map = append(g.Map, 0)
@@ -131,6 +133,7 @@ func (m *HgtMgr) run() {
                                 cr.ll = ll
                                 cr.ptr = ptr
                                 m.cacheMap[ll] = cr
+                                prepq = append(prepq, ptr)
                             }
                             break
                         }
@@ -147,6 +150,7 @@ func (m *HgtMgr) run() {
                     g.Map = append(g.Map, cr.ptr)
                     m.cache.MoveToFront(cr.le)
                 })
+                g.EvtReady = cuhgt.Prepare(prepq)
                 /*for k, v := range m.cache {
                     fmt.Println(k, *v)
                 }*/

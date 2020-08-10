@@ -298,28 +298,28 @@ extern "C" {
         Context* ctx = (Context*)ictx;
         cudaStream_t cus = ctx->stream;
 
-        //float* d_result;
         float result;
-        //cudaMalloc((void**)&d_result, sizeof(float));
-        //Query<<<1, 1, 0, cus>>>(ctx->HgtMap, rect, ll, d_result);
         Query<<<1, 1, 0, cus>>>(ctx->HgtMap, rect, ll, buf);
-        //cudaMemcpyAsync(&result, d_result, sizeof(float), cudaMemcpyDeviceToHost, cus);
         cudaMemcpyAsync(&result, buf, sizeof(float), cudaMemcpyDeviceToHost, cus);
-        //cudaFree(d_result);
         return result;
     }
 
-    TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect) {
+    TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect, uint64_t ihgtsReady) {
         Context* ctx = (Context*)ictx;
         const short** HgtMap_d = ctx->HgtMap;
         float* AzEleD_d = ctx->AzEleD;
         unsigned char* TSbuf_d = ctx->TSbuf;
         TileStrip TS = {nullptr};
         cudaStream_t cus = ctx->stream;
+        cudaEvent_t *hgtsReady = reinterpret_cast<cudaEvent_t*>(ihgtsReady);
 
         try {
 clk(nullptr, cus);
             cuErr(cudaMemcpyAsync(HgtMap_d, HgtMapIn, hgtRect.width * hgtRect.height * sizeof(uint64_t), cudaMemcpyHostToDevice, cus));
+
+            cuErr(cudaEventSynchronize(*hgtsReady));
+            cuErr(cudaEventDestroy(*hgtsReady));
+            delete hgtsReady;
 
             float myAlt = Query(ictx, hgtRect, myL, AzEleD_d) + myH;
             LL myR = myL.toRad();

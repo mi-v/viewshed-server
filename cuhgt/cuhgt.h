@@ -11,3 +11,8 @@ typedef struct UploadResult {
     uint64_t ptr;
     cuErrX error;
 } UploadResult;
+
+typedef struct PrepResult {
+    uint64_t eptr;
+    cuErrX error;
+} PrepResult;

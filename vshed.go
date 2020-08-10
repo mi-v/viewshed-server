@@ -7,8 +7,8 @@ import (
     . "vshed/conf"
     "vshed/latlon"
     "vshed/hgtmgr"
-    "vshed/cuvshed"
     "vshed/tiler"
+    "vshed/cuvshed"
     "encoding/json"
     "time"
     //"math"
@@ -158,7 +158,7 @@ func worker(tasks chan *task) {
         fmt.Println("GetGrid: ", time.Since(t))
 
         t = time.Now()
-        ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, grid.Map, grid.Recti)
+        ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, grid.Map, grid.Recti, grid.EvtReady)
         grid.Free()
         if err != nil {
             log.Println(err)

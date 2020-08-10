@@ -3,6 +3,7 @@ package cuhgt
 import (
     "os"
     "fmt"
+    _ "vshed/cuinit"
     "vshed/latlon"
     . "vshed/conf"
     "log"
@@ -11,7 +12,8 @@ import (
 // #include <stdint.h>
 // #include <stdlib.h>
 // #include "cuhgt.h"
-// UploadResult upload(int fd, int slot);
+// UploadResult uploadHgts(int fd, int slot);
+// PrepResult prepareHgts(uint64_t *Hgts, int cnt);
 // uint64_t cuhgtInit(int slots);
 // #cgo LDFLAGS: -L../ -lcuhgt
 import "C"
@@ -22,7 +24,7 @@ var hgtBase uint64
 func Fetch(ll latlon.LLi, dir string, slot int) (ptr uint64) {
     hgtName := dir + "/" + mkHgtName(ll)
     hf, err := os.Open(hgtName)
-    if (err != nil) {
+    if err != nil {
         return
     }
     defer hf.Close()
@@ -31,13 +33,26 @@ func Fetch(ll latlon.LLi, dir string, slot int) (ptr uint64) {
         return
     }
 
-    cUR := C.upload(C.int(hf.Fd()), C.int(slot))
-    if (cUR.error.msg != nil) {
+    cUR := C.uploadHgts(C.int(hf.Fd()), C.int(slot))
+    if cUR.error.msg != nil {
         log.Fatalf("CUDA error: %d %s in %s:%d", cUR.error.code, C.GoString(cUR.error.msg), C.GoString(cUR.error.file), cUR.error.line)
         //log.Printf("CUDA error: %d %s in %s:%d", cUR.error.code, C.GoString(cUR.error.msg), C.GoString(cUR.error.file), cUR.error.line)
         return
     }
     return uint64(cUR.ptr)
+}
+
+func Prepare(prepq []uint64) (eptr uint64) {
+    var cPR C.PrepResult
+    if len(prepq) > 0 {
+        cPR = C.prepareHgts((*C.ulong)(&prepq[0]), C.int(len(prepq)))
+    } else {
+        cPR = C.prepareHgts(nil, 0)
+    }
+    if cPR.error.msg != nil {
+        log.Fatalf("CUDA error: %d %s in %s:%d", cPR.error.code, C.GoString(cPR.error.msg), C.GoString(cPR.error.file), cPR.error.line)
+    }
+    return uint64(cPR.eptr)
 }
 
 func mkHgtName(ll latlon.LLi) string {
@@ -57,5 +72,6 @@ func mkHgtName(ll latlon.LLi) string {
 }
 
 func init() {
+    log.Println("cuhgt init")
     hgtBase = uint64(C.cuhgtInit(HGTSLOTS))
 }

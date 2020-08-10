@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+#include <algorithm>
 #include "cuhgt.h"
 
 #define cuErr(call)  {cudaError_t err; if (cudaSuccess != (err=(call))) throw cuErrX{err, cudaGetErrorString(err), __FILE__, __LINE__};}
@@ -17,8 +18,11 @@ __global__ void byteswap16(int32_t* Hgt) {
 }
 
 cudaStream_t cus;
-void* Hgt_h;
+void* Hgt_ha;
+void* Hgt_hb;
 short* Hgtbase;
+cudaEvent_t *xfer_a = new cudaEvent_t;
+cudaEvent_t *xfer_b = new cudaEvent_t;
 
 void inline clk(const char* str = nullptr) {
     static clock_t t = 0;
@@ -28,36 +32,56 @@ void inline clk(const char* str = nullptr) {
 }
 
 extern "C" {
-    UploadResult upload(int fd, int slot) {
+    UploadResult uploadHgts(int fd, int slot) {
         UploadResult Res = {0};
         short* Hgt_d = Hgtbase + slot * 1280 * 1201;
-clk();
         try {
-            read(fd, Hgt_h, HGTSIZE);
+            cudaEventSynchronize(*xfer_a);
+            read(fd, Hgt_ha, HGTSIZE);
             cuErr(cudaMemcpy2DAsync(
                 Hgt_d,
                 1280 * sizeof(short),
-                Hgt_h,
+                Hgt_ha,
                 1201 * sizeof(short),
                 1201 * sizeof(short),
                 1201,
                 cudaMemcpyHostToDevice,
                 cus
             ));
-            //byteswap16<<<dim3(19, 38), dim3(32, 32), 0, cus>>>((int32_t*)Hgt_d);
-            cuErr(cudaGetLastError());
-            cuErr(cudaStreamSynchronize(cus));
+            cuErr(cudaEventRecord(*xfer_a, cus));
+            std::swap(xfer_a, xfer_b);
+            std::swap(Hgt_ha, Hgt_hb);
             Res.ptr = (uint64_t)Hgt_d;
         } catch (cuErrX error) {
             Res.error = error;
         }
-clk("Upload");
+        return Res;
+    }
+
+    PrepResult prepareHgts(uint64_t *Hgts, int cnt) {
+        PrepResult Res = {0};
+        cudaEvent_t *evt = new cudaEvent_t;
+        try {
+            for (int i = 0; i < cnt; i++) {
+                byteswap16<<<dim3(19, 38), dim3(32, 32), 0, cus>>>(reinterpret_cast<int32_t*>(Hgts[i]));
+            }
+            cuErr(cudaGetLastError());
+            //cuErr(cudaEventCreateWithFlags(evt, cudaEventBlockingSync | cudaEventDisableTiming));
+            cuErr(cudaEventCreateWithFlags(evt, cudaEventDisableTiming));
+            cuErr(cudaEventRecord(*evt, cus));
+        } catch (cuErrX error) {
+            Res.error = error;
+        }
+        Res.eptr = (uint64_t)evt;
         return Res;
     }
 
     uint64_t cuhgtInit(int slots) {
         cudaStreamCreate(&cus);
-        cudaHostAlloc(&Hgt_h, HGTSIZE, 0);
+        cudaHostAlloc(&Hgt_ha, HGTSIZE, cudaHostAllocWriteCombined);
+        cudaHostAlloc(&Hgt_hb, HGTSIZE, cudaHostAllocWriteCombined);
+        cudaEventCreateWithFlags(xfer_a, cudaEventDisableTiming);
+        cudaEventCreateWithFlags(xfer_b, cudaEventDisableTiming);
 
         cudaMalloc(&Hgtbase, slots * 1280 * 1201 * sizeof(short));
         return (uint64_t)Hgtbase;
