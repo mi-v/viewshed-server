@@ -52,12 +52,11 @@ func (ll LL) Wrap() LL {
 }
 
 func (ll LLi) Wrap() LLi {
-    if ll.Lon >= -180 && ll.Lon < 180 {
-        return ll
+    for ll.Lon < -180 {
+        ll.Lon += 360
     }
-    ll.Lon = (ll.Lon + 180) % 360 - 180
-    if ll.Lon == 180 {
-        ll.Lon = -180
+    for ll.Lon >= 180 {
+        ll.Lon -= 360
     }
     return ll
 }

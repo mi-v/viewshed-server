@@ -19,6 +19,7 @@ struct Context {
     cudaStream_t stream;
     const short** HgtMap;
     float* AzEleD;
+    float* myAlt;
     unsigned char* TSbuf;
     unsigned char* TSbuf_h;
 };
@@ -85,7 +86,12 @@ __global__ void Query(const short** __restrict__ HgtMap, Recti rect, LL ll, floa
     *result = hgtQuery(HgtMap, rect, ll);
 }
 
-__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, float myAlt, LL myL)
+__global__ void altQuery(const short** __restrict__ HgtMap, Recti rect, LL ll, float myH, float* result) {
+    if (blockIdx.x || blockIdx.y || threadIdx.x || threadIdx.y) return;
+    *result = myH + hgtQuery(HgtMap, rect, ll);
+}
+
+__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, const float* __restrict__ myAlt, LL myL)
 {
     int az = blockIdx.x * blockDim.x + threadIdx.x;
     int distN = blockIdx.y * blockDim.y + threadIdx.y;
@@ -102,7 +108,7 @@ __global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float*
 
     float hgt = hgtQuery(HgtMap, hgtRect, ptL);
 
-    float elev = abElev(myAlt, hgt, rDist);
+    float elev = abElev(*myAlt, hgt, rDist);
 
     int ofs = distN * ANGSTEPS + az;
     AzEleD[ofs] = elev;
@@ -128,7 +134,7 @@ __global__ void doVisMap(
     Recti hgtRect,
     const float* __restrict__ AzEleD,
     LL myL,
-    float myAlt,
+    const float* __restrict__ myAlt,
     float theirH,
     Px2 pxBase,
     unsigned char* __restrict__ visMap,
@@ -151,7 +157,7 @@ __global__ void doVisMap(
 
     float hgt = hgtQuery(HgtMap, hgtRect, ptL) + theirH;
 
-    float elev = abElev(myAlt, hgt, distR);
+    float elev = abElev(*myAlt, hgt, distR);
 
     float dist = ERAD * distR;
     int distN = floorf((sqrtf(1 + 8 * (dist - CUTON) / DSTEP) - 1) / 2);
@@ -191,7 +197,7 @@ __global__ void doVisMap(
 
             hgt = hgtQuery(HgtMap, hgtRect, ptL);
 
-            float stepElev = abElev(myAlt, hgt, distR);
+            float stepElev = abElev(*myAlt, hgt, distR);
 
             if (stepElev < elev) {
                 visible = false;
@@ -215,27 +221,7 @@ __global__ void doVisMap(
     }
 }
 
-/*template __global__ void doVisMap<VIS_IMAGE>(
-    const short** __restrict__ HgtMap,
-    Recti hgtRect,
-    const float* __restrict__ AzEleD,
-    LL myL,
-    float myAlt,
-    Px2 pxBase,
-    unsigned char* __restrict__ visMap
-);
-
-template __global__ void doVisMap<VIS_TILES>(
-    const short** __restrict__ HgtMap,
-    Recti hgtRect,
-    const float* __restrict__ AzEleD,
-    LL myL,
-    float myAlt,
-    Px2 pxBase,
-    unsigned char* __restrict__ visMap
-);*/
-
-__global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[][256][256/32], PxRect srcRect, PxRect dstRect) {
+__global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[][256][256/32], PxRect srcRect, PxRect dstRect, int zoom) {
     int dstTileIdx = int(blockIdx.y * blockDim.y + threadIdx.y) / 256;
     Px2 dstPosInTile = {
         int(blockIdx.x * blockDim.x + threadIdx.x) * 32, // each thread is 32 px wide
@@ -245,14 +231,13 @@ __global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[
     Px2 dstTilePos = dstRect[dstTileIdx];
     Px2 dstWorldPos = dstTilePos * 256 + dstPosInTile;
     Px2 srcWorldPos = dstWorldPos * 2;
-    Px2 srcTilePos = srcWorldPos / 256;
+    Px2 srcTilePos = srcWorldPos >> 8; // [impln dep] arithmetic shift to correctly round down negatives
 
     if (!srcRect.contains(srcTilePos)) {
-        DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = 0;//x10001000;
         return;
     }
 
-    Px2 srcPosInTile = srcWorldPos % 256;
+    Px2 srcPosInTile = srcWorldPos & 255;
 
     uint32_t out = 0;
     uint32_t in;
@@ -282,7 +267,11 @@ __global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[
         mask <<= 1;
     }
 
-    DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = bswap32(out);
+    if (zoom > 0) {
+        DstTiles[dstTileIdx][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x] = bswap32(out);
+    } else { // may wrap twice into the same tile
+        atomicOr(&DstTiles[0][dstPosInTile.y][blockIdx.x * blockDim.x + threadIdx.x], bswap32(out));
+    }
 }
 
 void inline clk(const char* str, cudaStream_t cus) {
@@ -308,6 +297,7 @@ extern "C" {
         Context* ctx = (Context*)ictx;
         const short** HgtMap_d = ctx->HgtMap;
         float* AzEleD_d = ctx->AzEleD;
+        float* myAlt_d = ctx->myAlt;
         unsigned char* TSbuf_d = ctx->TSbuf;
         TileStrip TS = {nullptr};
         cudaStream_t cus = ctx->stream;
@@ -321,14 +311,13 @@ clk(nullptr, cus);
             cuErr(cudaEventDestroy(*hgtsReady));
             delete hgtsReady;
 
-            float myAlt = Query(ictx, hgtRect, myL, AzEleD_d) + myH;
-            LL myR = myL.toRad();
+            altQuery<<<1, 1, 0, cus>>>(HgtMap_d, hgtRect, myL, myH, myAlt_d);
 
             doScape<<<dim3(ANGSTEPS/32, DSTEPS/32), dim3(32, 32), 0, cus>>>(
                 HgtMap_d,
                 hgtRect,
                 AzEleD_d,
-                myAlt,
+                myAlt_d,
                 myL
             );
             cuErr(cudaGetLastError());
@@ -336,6 +325,7 @@ clk(nullptr, cus);
             elevProject<<<dim3(ANGSTEPS/256), dim3(256), 0, cus>>>(AzEleD_d);
             cuErr(cudaGetLastError());
 
+            LL myR = myL.toRad();
             LL rngR = {config.CUTOFF / ERAD};
             rngR.lon = -rngR.lat / cosf(myR.lat);
 
@@ -352,6 +342,7 @@ clk(nullptr, cus);
             irect.Q.x |= 255;
             irect.Q.y |= 255;
             irect.Q ++;
+            irect = irect.cropY(256 << zoom);
 printf("Image: %d x %d, %d bytes, z: %d  lat=%f  lon=%f\n", irect.w(), irect.h(), (irect.wh() + 7) / 8, zoom, myL.lat, myL.lon);
 
             TS.setup(irect, zoom);
@@ -362,7 +353,7 @@ printf("Image: %d x %d, %d bytes, z: %d  lat=%f  lon=%f\n", irect.w(), irect.h()
                 hgtRect,
                 AzEleD_d,
                 myL,
-                myAlt,
+                myAlt_d,
                 theirH,
                 irect.P,
                 TSbuf_d,
@@ -378,23 +369,23 @@ clk("doVisMap", cus);
                     reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + TS.z[z].pretiles, // src tiles ptr cast to array[] of bit tiles of uint32 (hence the /32)
                     reinterpret_cast<uint32_t(*)[256][256/32]>(TSbuf_d) + TS.z[z-1].pretiles, // dst tiles ptr
                     TS.z[z].rect,
-                    TS.z[z-1].rect
+                    TS.z[z-1].rect,
+                    z-1
                 );
                 cuErr(cudaGetLastError());
             }
+            TS.z[0].ntiles = 1;
 clk("unzoom", cus);
 
-            //TS.buf = malloc(TS.nbytes);
-            //cuErr(cudaMemcpyAsync(TS.buf, TSbuf_d, TS.nbytes, cudaMemcpyDeviceToHost, cus));
 printf("nby: %d\n", TS.nbytes);
             TS.buf = ctx->TSbuf_h;
             cuErr(cudaMemcpyAsync(TS.buf, TSbuf_d, TS.nbytes, cudaMemcpyDeviceToHost, cus));
+            cudaStreamSynchronize(cus);
+            cuErr(cudaMemsetAsync(TSbuf_d, 0, TS.nbytes, cus));
         } catch (cuErrX error) {
-            //free(TS.buf);
             TS.error = error;
         }
 
-        cudaStreamSynchronize(cus);
         return TS;
     }
 
@@ -404,6 +395,7 @@ printf("nby: %d\n", TS.nbytes);
             cuErr(cudaStreamCreate(&ctx->stream));
             cuErr(cudaMalloc(&ctx->HgtMap, ceilf(2 * config.CUTOFF / CSLAT + 1) * ceilf(2 * config.CUTOFF / (CSLAT * cosdf(85.0f)) + 1) * sizeof(uint64_t)));
             cuErr(cudaMalloc(&ctx->AzEleD, ANGSTEPS * DSTEPS * sizeof(float)));
+            cuErr(cudaMalloc(&ctx->myAlt, sizeof(float)));
 
             size_t TSbytes = 0;
             int width = config.MAXWIDTH;
@@ -419,6 +411,7 @@ printf("nby: %d\n", TS.nbytes);
             } while (height > 1);
 printf("nby: %d\n", TSbytes);
             cuErr(cudaMalloc(&ctx->TSbuf, TSbytes));
+            cuErr(cudaMemsetAsync(ctx->TSbuf, 0, TSbytes, ctx->stream));
             cudaHostAlloc(&ctx->TSbuf_h, TSbytes, 0);
         } catch (cuErrX error) {
             cudaStreamDestroy(ctx->stream);

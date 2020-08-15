@@ -57,9 +57,7 @@ func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, hgtmap []uint64, r
     TS := tiler.NewStrip(
         (*[1<<30]byte)(cTS.buf)[:cTS.nbytes:cTS.nbytes],
         sz,
-        nil,//func() {C.free(cTS.buf)},
     );
-    //fmt.Println(cTS);
     return TS, nil
 }
 

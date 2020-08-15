@@ -40,9 +40,9 @@ func init() {
                 //CompressionLevel: png.BestSpeed,
             }
             for task := range tasks {
-task.report.Done()
-continue
-                dir := fmt.Sprintf("%s/z%d/%d", task.dir, task.Z, task.X)
+//task.report.Done()
+//continue
+                dir := fmt.Sprintf("%s/z%d/%d", task.dir, task.Z, task.X & (1 << task.Z - 1))
                 fn := fmt.Sprintf("%s/%d.png", dir, task.Y)
                 fd, err := os.Create(fn)
                 if err != nil {

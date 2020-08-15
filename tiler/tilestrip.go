@@ -1,5 +1,7 @@
 package tiler
 
+//import "log"
+
 type Corner struct {
     X, Y int
 }
@@ -14,7 +16,7 @@ type Rect struct {
     P, Q Corner
 }
 
-var tileRect = Rect{
+var _tileRect = Rect{
     Corner{0, 0},
     Corner{256, 256},
 }
@@ -28,7 +30,6 @@ type StripZoom struct {
 type Strip struct {
     buf []byte
     Z []StripZoom
-    free func()
     idx, iz int
 }
 
@@ -55,25 +56,22 @@ func (r Rect) IndexOf(p Corner) int {
     return (p.Y - r.P.Y) * r.W() + (p.X - r.P.X)
 }
 
-func NewStrip(buf []byte, sz []StripZoom, free func()) *Strip {
+func (r Rect) WrapX(z int) Rect {
+    return Rect{
+        P: Corner{r.P.X & (1 << z - 1), r.P.Y},
+        Q: Corner{r.Q.X & (1 << z - 1), r.Q.Y},
+    }
+}
+
+func NewStrip(buf []byte, sz []StripZoom) *Strip {
     return &Strip{
         buf: buf,
         Z: sz,
-        free: free,
     }
 }
 
 func (ts *Strip) MaxZ() int {
     return len(ts.Z) - 1;
-}
-
-func (ts *Strip) Free() {
-    if ts.free == nil {
-        return
-    }
-    ts.buf = nil
-    ts.free()
-    ts.free = nil
 }
 
 func (ts *Strip) Rewind() (Tile, bool) {
@@ -84,11 +82,14 @@ func (ts *Strip) Rewind() (Tile, bool) {
 
 func (ts *Strip) QueryPx(pos Corner, z int) bool {
     Z := ts.Z[z]
-    tlPos := Corner{pos.X / 256, pos.Y / 256}
-    pxPos := Corner{pos.X % 256, pos.Y % 256}
+    tlPos := Corner{pos.X >> 8, pos.Y >> 8}
+    pxPos := Corner{pos.X & 255, pos.Y & 255}
     tlIdx := Z.IndexOf(tlPos)
-    pxIdx := tileRect.IndexOf(pxPos)
-    return (ts.buf[(Z.Pretiles + tlIdx) * tileBytes + pxIdx / 8] & (0x80 >> (pxIdx % 8))) != 0
+    if z == 0 {
+        tlIdx = 0
+    }
+    pxIdx := _tileRect.IndexOf(pxPos)
+    return (ts.buf[(Z.Pretiles + tlIdx) * tileBytes + pxIdx >> 3] & (0x80 >> (pxIdx & 7))) != 0
 }
 
 func (ts *Strip) Next() (Tile, bool) {

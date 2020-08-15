@@ -156,6 +156,7 @@ func worker(tasks chan *task) {
         t = time.Now()
         grid := hm.GetGridAround(tk.ll)
         fmt.Println("GetGrid: ", time.Since(t))
+        //fmt.Printf("ll: %+v  g: %+v\n", tk.ll, grid)
 
         t = time.Now()
         ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, grid.Map, grid.Recti, grid.EvtReady)
@@ -174,7 +175,7 @@ func worker(tasks chan *task) {
             if z > 7 {
                 tilemask[z-8] = make([]byte, (Z.WH()+7)/8)
             }
-            r.Zrects = append(r.Zrects, Z.Rect)
+            r.Zrects = append(r.Zrects, Z.Rect.WrapX(z))
         }
 
         var wg sync.WaitGroup
@@ -188,7 +189,6 @@ func worker(tasks chan *task) {
             }
         }
         wg.Wait()
-        ts.Free()
         fmt.Println("Tile cutting: ", time.Since(t))
         r.Tilemask = tilemask
 

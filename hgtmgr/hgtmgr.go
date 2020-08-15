@@ -113,6 +113,7 @@ func (m *HgtMgr) run() {
                         g.Map = append(g.Map, 0)
                         return
                     }
+                    ll = ll.Wrap()
                     m.cacheRq++
                     cr, ok := m.cacheMap[ll]
                     if !ok {
@@ -156,7 +157,7 @@ func (m *HgtMgr) run() {
                 }*/
                 rq.replyto <- g
                 m.opcount++
-if m.opcount & 63 == 0 {
+if m.opcount & 7 == 0 {
     fmt.Printf("Cache HIT: %.1f%%\n", float64(m.cacheRq - m.cacheMiss) * 100 / float64(m.cacheRq))
 }
             case g := <-m.free:
@@ -167,7 +168,7 @@ if m.opcount & 63 == 0 {
                     if g.mask[i] == false {
                         return
                     }
-                    cr, ok := m.cacheMap[ll]
+                    cr, ok := m.cacheMap[ll.Wrap()]
                     if ok {
                         cr.users--
                     } else {

@@ -9,6 +9,10 @@
 #define DSTEPS 2048
 #define ANGSTEPS 4096
 
+#ifdef __cplusplus
+#include <algorithm>
+#endif
+
 typedef struct {
     float CUTOFF;
     float CUTON;
@@ -73,9 +77,14 @@ typedef struct Px2 {
     __host__ __device__ Px2 operator% (int b) {return Px2{x%b, y%b};};
     __host__ __device__ Px2& operator*= (int b) {x *= b; y *= b; return *this;};
     __host__ __device__ Px2& operator/= (int b) {x /= b; y /= b; return *this;};
+    __host__ __device__ Px2& operator>>= (int b) {x >>= b; y >>= b; return *this;};
+    __host__ __device__ Px2& operator&= (int b) {x &= b; y &= b; return *this;};
     __host__ __device__ Px2 friend operator* (Px2 a, int b) {return a *= b;};
     __host__ __device__ Px2 friend operator/ (Px2 a, int b) {return a /= b;};
+    __host__ __device__ Px2 friend operator>> (Px2 a, int b) {return a >>= b;};
+    __host__ __device__ Px2 friend operator& (Px2 a, int b) {return a &= b;};
     __host__ __device__ operator float() {return hypotf(x, y);};
+    __host__ __device__ Px2 cropY(int height) {return Px2{x, y <= 0 ? 0 : y <= height ? y : height};};
     __host__ __device__ LL toLL(int zoom) {
         return LL{
             2 * atanf(expf(PI * (1 - float(y) / (128 << zoom)))) - PI / 2,
@@ -98,6 +107,7 @@ typedef struct PxRect {
         __host__ __device__ Px2 operator[] (int i) {return Px2{P.x + i%w(), P.y + i/w()};};
         __host__ __device__ PxRect friend operator* (PxRect a, int b) {return a *= b;};
         __host__ __device__ PxRect friend operator/ (PxRect a, int b) {return a /= b;};
+        __host__ __device__ PxRect cropY(int height) {return PxRect{P.cropY(height), Q.cropY(height)};};
     #endif
 } PxRect;
 
@@ -133,11 +143,13 @@ typedef struct TileStrip {
                 StripZoom &zoom = z[zl-1];
                 zoom = z[zl];
                 zoom.pretiles += zoom.ntiles;
-                zoom.rect.P /= 2;
                 zoom.rect.Q ++;
-                zoom.rect.Q /= 2;
+                zoom.rect.P >>= 1; // [impln dep] arithmetic shift to correctly round down negatives
+                zoom.rect.Q >>= 1;
                 zoom.ntiles = zoom.rect.wh();
             }
+
+            //z[0].ntiles = 1; // may wrap twice into the same tile
         };
     #endif
 } TileStrip;
