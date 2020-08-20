@@ -21,18 +21,24 @@ import (
     "io/ioutil"
 )
 
+type taskId struct {
+    ll latlon.LL
+    obsAh, obsBh int
+}
+
 type response struct {
     Tilemask [][]byte `json:"tmap,omitempty"`
     Zrects []tiler.Rect `json:"zrct,omitempty"`
     Tilepath string `json:"tpth,omitempty"`
     Zlim int `json:"zlim,omitempty"`
+    Qp int `json:"qp,omitempty"`
     err bool
+    taskId
+    json []byte
 }
 
-
 type task struct {
-    ll latlon.LL
-    obsAh, obsBh int
+    taskId
     tilepath string
     replyto chan *response
 }
@@ -54,9 +60,7 @@ func main() {
     originHostRE := regexp.MustCompile(`(votetovid\.ru|mapofviews\.com)(:|/|$)`)
 
     tasks := make(chan *task)
-    for i := 0; i < 2; i++ {
-        go worker(tasks)
-    }
+    go qmgr(tasks)
 
     http.HandleFunc("/", func (w http.ResponseWriter, r *http.Request) {
         if r.Method != "GET" {
@@ -113,22 +117,25 @@ func main() {
 
         rc := make(chan *response)
         tasks <- &task{
-            ll: latlon.LL{lat, lon}.Wrap(),
-            obsAh: obsAh,
-            obsBh: obsBh,
+            taskId: taskId{
+                ll: latlon.LL{lat, lon}.Wrap(),
+                obsAh: obsAh, obsBh: obsBh,
+            },
             tilepath: tilepath,
             replyto: rc,
         }
 
-        rp := <-rc
-        if rp.err {
+        rs := <-rc
+        if rs.err {
             http.Error(w, "Server error", 500)
             return
         }
 
-        j, _ := json.Marshal(rp);
-        ioutil.WriteFile(tiledir + "/layout.json", j, 0666)
-        w.Write(j)
+        if rs.json == nil {
+            rs.json, _ = json.Marshal(rs);
+        }
+
+        w.Write(rs.json)
 
         return
 
@@ -149,7 +156,7 @@ func worker(tasks chan *task) {
     ctx := cuvshed.MakeCtx()
 
     for tk := range tasks {
-        r := response{}
+        r := response{taskId: tk.taskId}
 
         var t time.Time
 
@@ -195,6 +202,111 @@ func worker(tasks chan *task) {
         r.Tilepath = tk.tilepath
         r.Zlim = ts.MaxZ();
 
+        r.json, _ = json.Marshal(r);
+        ioutil.WriteFile(tiledir + "/layout.json", r.json, 0666)
+
         tk.replyto <- &r
+    }
+}
+
+func qmgr(tkin chan *task) {
+    type qentry struct {
+        *task
+        pos int
+        ts time.Time
+        qrt *time.Timer
+    }
+
+    var q []*qentry
+    tkout := make(chan *task)
+    rsin := make(chan *response)
+    qmap := make(map[taskId]*qentry)
+    rsout := make(map[taskId]chan *response)
+    dqd := 0 // dequeued tasks, supposed to be one less than head pos
+    qrtc := make(chan *qentry) // quick reply timeouts channel
+
+    for i := 0; i < 2; i++ {
+        go worker(tkout)
+    }
+
+    for {
+        tkout := tkout // a local shadow
+        var tk *task
+
+        for len(q) > 0 && q[0].ts.Add(2*time.Second).Before(time.Now()) {
+            fmt.Printf("canceled: %+v\n", q[0].taskId);
+            delete(qmap, q[0].taskId) // shake off canceled tasks
+            delete(rsout, q[0].taskId)
+            q = q[1:]
+            dqd++
+        }
+
+        if len(q) > 0 { // if we have something queued
+            tk = q[0].task // get it ready
+        } else {
+            tkout = nil // otherwise we'll be poking nil channel instead
+        }
+
+        select {
+        case tk := <-tkin: // got a new task
+            fmt.Printf("got a task: %+v\n", *tk);
+            qe, ok := qmap[tk.taskId] // is it already queued?
+            if ok {
+                qe.ts = time.Now() // then update its timestamp,
+                pos := qe.pos - dqd // , get its position
+                if pos < 1 {
+                    pos = 1
+                }
+                select {
+                    case tk.replyto <- &response{Qp: pos}: // and reply
+                    default: // but no worries if we can't
+                }
+
+            } else { // if it's not then queue it
+                rsout[tk.taskId] = tk.replyto // save the task's response channel
+                tk.replyto = rsin // and substitute our own
+                var qe *qentry
+                qe = &qentry{
+                    task: tk,
+                    pos: dqd + len(q) + 1,
+                    ts: time.Now(),
+                    qrt: time.AfterFunc( // start a timer to notify of a quick reply timeout
+                        500 * time.Millisecond,
+                        func () {qrtc <- qe},
+                    ),
+                }
+                qmap[qe.taskId] = qe
+                q = append(q, qe)
+            }
+
+        case qe := <-qrtc: // a quick reply timed out
+            fmt.Printf("quick reply timed out: %+v\n", *qe);
+            pos := qe.pos - dqd
+            if pos < 1 {
+                pos = 1
+            }
+            select {
+                case rsout[qe.taskId] <- &response{Qp: pos}:
+                default:
+            }
+
+        case tkout <- tk: // started a task, dequeue it
+            fmt.Printf("task started: %+v\n", *tk);
+            q = q[1:]
+            dqd++
+
+        case rs := <-rsin: // got a worker response
+            fmt.Printf("worker response on %+v\n", rs.taskId);
+            if qmap[rs.taskId] != nil {
+                qmap[rs.taskId].qrt.Stop()
+            }
+            select { // try to forward it
+                case rsout[rs.taskId] <- rs:
+                default:
+            }
+            delete(qmap, rs.taskId)
+            delete(rsout, rs.taskId)
+        }
+        fmt.Printf("q:%+v  qmap:%+v  rsout:%+v  dqd:%+v\n", q, qmap, rsout, dqd);
     }
 }
