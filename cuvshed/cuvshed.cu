@@ -343,7 +343,7 @@ clk(nullptr, cus);
             irect.Q.y |= 255;
             irect.Q ++;
             irect = irect.cropY(256 << zoom);
-printf("Image: %d x %d, %d bytes, z: %d  lat=%f  lon=%f\n", irect.w(), irect.h(), (irect.wh() + 7) / 8, zoom, myL.lat, myL.lon);
+//printf("Image: %d x %d, %d bytes, z: %d  lat=%f  lon=%f\n", irect.w(), irect.h(), (irect.wh() + 7) / 8, zoom, myL.lat, myL.lon);
 
             TS.setup(irect, zoom);
             TS.nbytes = (TS.z[0].pretiles + 1) * 256 * 256 / 8;
@@ -377,7 +377,7 @@ clk("doVisMap", cus);
             TS.z[0].ntiles = 1;
 clk("unzoom", cus);
 
-printf("nby: %d\n", TS.nbytes);
+//printf("nby: %d\n", TS.nbytes);
             TS.buf = ctx->TSbuf_h;
             cuErr(cudaMemcpyAsync(TS.buf, TSbuf_d, TS.nbytes, cudaMemcpyDeviceToHost, cus));
             cudaStreamSynchronize(cus);
@@ -409,7 +409,7 @@ printf("nby: %d\n", TS.nbytes);
                 width = (width + 1) / 2;
                 height = (height + 1) / 2;
             } while (height > 1);
-printf("nby: %d\n", TSbytes);
+//printf("nby: %d\n", TSbytes);
             cuErr(cudaMalloc(&ctx->TSbuf, TSbytes));
             cuErr(cudaMemsetAsync(ctx->TSbuf, 0, TSbytes, ctx->stream));
             cudaHostAlloc(&ctx->TSbuf_h, TSbytes, 0);

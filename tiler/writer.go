@@ -11,6 +11,10 @@ import (
     "vshed/img1b/png"
 )
 
+type Tiler struct {
+    c chan encTask
+}
+
 type encTask struct {
     Tile
     dir string
@@ -31,15 +35,15 @@ func (p *encPool) Put(b *png.EncoderBuffer) {
 	p.b = b
 }
 
-func init() {
-    tasks = make(chan encTask)
+func New() (tr *Tiler) {
+    tr = &Tiler{make(chan encTask)}
     for i := 0; i < 7; i++ {
         go func() {
             e := png.Encoder{
                 BufferPool: &encPool{},
                 //CompressionLevel: png.BestSpeed,
             }
-            for task := range tasks {
+            for task := range tr.c {
 //task.report.Done()
 //continue
                 dir := fmt.Sprintf("%s/z%d/%d", task.dir, task.Z, task.X & (1 << task.Z - 1))
@@ -69,8 +73,9 @@ func init() {
             }
         }()
     }
+    return tr
 }
 
-func (t Tile) Encode(dir string, report *sync.WaitGroup) {
-    tasks <- encTask{t, dir, report}
+func (tr *Tiler) Encode(te Tile, dir string, report *sync.WaitGroup) {
+    tr.c <- encTask{te, dir, report}
 }

@@ -5,6 +5,8 @@ import (
     "fmt"
     "log"
     . "vshed/conf"
+    "vshed/deps"
+    "vshed/metrics"
     "vshed/latlon"
     "vshed/hgtmgr"
     "vshed/tiler"
@@ -43,7 +45,20 @@ type task struct {
     replyto chan *response
 }
 
-var hm *hgtmgr.HgtMgr
+var mtx struct {
+    HttpRequests metrics.Unit `mtx:"HTTP requests"`
+    HttpFileResponses metrics.Unit `mtx:"HTTP responses from a file"`
+    TasksCanceled metrics.Unit `mtx:"Canceled tasks"`
+    TasksNew metrics.Unit `mtx:"New tasks queued"`
+    TasksQLen metrics.Unit `mtx:"Task queue length"`
+    TasksQRTO metrics.Unit `mtx:"Task quick reply timeouts"`
+    TasksDone metrics.Unit `mtx:"Tasks finished"`
+    TimeGetGrid metrics.Unit `mtx:"Grid assembly time, ms"`
+    TimeCompute metrics.Unit `mtx:"Computation time, ms"`
+    TimeCutTiles metrics.Unit `mtx:"Tile encoding time, ms"`
+    TilesWritten metrics.Unit `mtx:"Tiles written"`
+    TilesSkipped metrics.Unit `mtx:"Tiles skipped"`
+}
 
 func main() {
     /*pf, _ := os.Create("vs.prof");
@@ -51,18 +66,27 @@ func main() {
     defer pprof.StopCPUProfile()*/
 
     var err error
+    dc := deps.Container{}
 
-    hm, err = hgtmgr.New(HGTDIR)
+    dc.MetricsCollector = metrics.NewCollector()
+    dc.MetricsCollector.Register("Main module", &mtx)
+
+    dc.Tiler = tiler.New()
+
+    dc.HgtMgr, err = hgtmgr.New(HGTDIR)
     if err != nil {
         log.Fatal(err)
     }
 
+    mc := dc.MetricsCollector
+
     originHostRE := regexp.MustCompile(`(votetovid\.ru|mapofviews\.com)(:|/|$)`)
 
     tasks := make(chan *task)
-    go qmgr(tasks)
+    go qmgr(tasks, dc)
 
     http.HandleFunc("/", func (w http.ResponseWriter, r *http.Request) {
+        mc.Add(&mtx.HttpRequests, 0)
         if r.Method != "GET" {
             http.Error(w, "Unsupported method", http.StatusMethodNotAllowed)
             return
@@ -108,6 +132,7 @@ func main() {
 
         jf, err := os.Open(tiledir + "/layout.json")
         if err == nil {
+            mc.Add(&mtx.HttpFileResponses, 0)
             defer jf.Close()
             now := time.Now()
             os.Chtimes(jf.Name(), now, now)
@@ -152,8 +177,9 @@ func main() {
     log.Fatal(http.ListenAndServe(":3003", nil))
 }
 
-func worker(tasks chan *task) {
+func worker(tasks chan *task, dc deps.Container) {
     ctx := cuvshed.MakeCtx()
+    mc := dc.MetricsCollector
 
     for tk := range tasks {
         r := response{taskId: tk.taskId}
@@ -161,9 +187,8 @@ func worker(tasks chan *task) {
         var t time.Time
 
         t = time.Now()
-        grid := hm.GetGridAround(tk.ll)
-        fmt.Println("GetGrid: ", time.Since(t))
-        //fmt.Printf("ll: %+v  g: %+v\n", tk.ll, grid)
+        grid := dc.HgtMgr.GetGridAround(tk.ll)
+        mc.Add(&mtx.TimeGetGrid, int(time.Since(t).Milliseconds()))
 
         t = time.Now()
         ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, grid.Map, grid.Recti, grid.EvtReady)
@@ -174,9 +199,10 @@ func worker(tasks chan *task) {
             tk.replyto <- &r
             continue
         }
-        fmt.Println("TileStrip: ", time.Since(t))
+        mc.Add(&mtx.TimeCompute, int(time.Since(t).Milliseconds()))
 
         t = time.Now()
+        cnt := 0
         tilemask := make([][]byte, ts.MaxZ()-7)
         for z, Z := range ts.Z {
             if z > 7 {
@@ -189,16 +215,19 @@ func worker(tasks chan *task) {
         tiledir := TILEDIR + "/" + tk.tilepath
         for tl, ok := ts.Rewind(); ok; tl, ok = ts.Next() {
             wg.Add(1)
-            tl.Encode(tiledir, &wg)
+            cnt++
+            dc.Tiler.Encode(tl, tiledir, &wg)
             if tl.Z > 7 {
                 tlIdx := ts.Z[tl.Z].IndexOf(tl.Corner)
                 tilemask[tl.Z-8][tlIdx/8] |= 1 << (tlIdx%8)
             }
         }
         wg.Wait()
-        fmt.Println("Tile cutting: ", time.Since(t))
-        r.Tilemask = tilemask
+        mc.Add(&mtx.TimeCutTiles, int(time.Since(t).Milliseconds()))
+        mc.Add(&mtx.TilesWritten, cnt)
+        mc.Add(&mtx.TilesSkipped, ts.Z[0].Pretiles + 1 - cnt)
 
+        r.Tilemask = tilemask
         r.Tilepath = tk.tilepath
         r.Zlim = ts.MaxZ();
 
@@ -209,7 +238,7 @@ func worker(tasks chan *task) {
     }
 }
 
-func qmgr(tkin chan *task) {
+func qmgr(tkin chan *task, dc deps.Container) {
     type qentry struct {
         *task
         pos int
@@ -224,9 +253,10 @@ func qmgr(tkin chan *task) {
     rsout := make(map[taskId]chan *response)
     dqd := 0 // dequeued tasks, supposed to be one less than head pos
     qrtc := make(chan *qentry) // quick reply timeouts channel
+    mc := dc.MetricsCollector
 
     for i := 0; i < 2; i++ {
-        go worker(tkout)
+        go worker(tkout, dc)
     }
 
     for {
@@ -234,11 +264,11 @@ func qmgr(tkin chan *task) {
         var tk *task
 
         for len(q) > 0 && q[0].ts.Add(2*time.Second).Before(time.Now()) {
-            fmt.Printf("canceled: %+v\n", q[0].taskId);
             delete(qmap, q[0].taskId) // shake off canceled tasks
             delete(rsout, q[0].taskId)
             q = q[1:]
             dqd++
+            mc.Add(&mtx.TasksCanceled, 0)
         }
 
         if len(q) > 0 { // if we have something queued
@@ -249,7 +279,6 @@ func qmgr(tkin chan *task) {
 
         select {
         case tk := <-tkin: // got a new task
-            fmt.Printf("got a task: %+v\n", *tk);
             qe, ok := qmap[tk.taskId] // is it already queued?
             if ok {
                 qe.ts = time.Now() // then update its timestamp,
@@ -263,6 +292,7 @@ func qmgr(tkin chan *task) {
                 }
 
             } else { // if it's not then queue it
+                mc.Add(&mtx.TasksNew, 0)
                 rsout[tk.taskId] = tk.replyto // save the task's response channel
                 tk.replyto = rsin // and substitute our own
                 var qe *qentry
@@ -271,16 +301,18 @@ func qmgr(tkin chan *task) {
                     pos: dqd + len(q) + 1,
                     ts: time.Now(),
                     qrt: time.AfterFunc( // start a timer to notify of a quick reply timeout
-                        500 * time.Millisecond,
+                        //500 * time.Millisecond,
+                        5000 * time.Millisecond,
                         func () {qrtc <- qe},
                     ),
                 }
                 qmap[qe.taskId] = qe
                 q = append(q, qe)
+                mc.Add(&mtx.TasksQLen, len(q))
             }
 
         case qe := <-qrtc: // a quick reply timed out
-            fmt.Printf("quick reply timed out: %+v\n", *qe);
+            mc.Add(&mtx.TasksQRTO, 0)
             pos := qe.pos - dqd
             if pos < 1 {
                 pos = 1
@@ -291,12 +323,10 @@ func qmgr(tkin chan *task) {
             }
 
         case tkout <- tk: // started a task, dequeue it
-            fmt.Printf("task started: %+v\n", *tk);
             q = q[1:]
             dqd++
 
         case rs := <-rsin: // got a worker response
-            fmt.Printf("worker response on %+v\n", rs.taskId);
             if qmap[rs.taskId] != nil {
                 qmap[rs.taskId].qrt.Stop()
             }
@@ -306,7 +336,7 @@ func qmgr(tkin chan *task) {
             }
             delete(qmap, rs.taskId)
             delete(rsout, rs.taskId)
+            mc.Add(&mtx.TasksDone, 0)
         }
-        fmt.Printf("q:%+v  qmap:%+v  rsout:%+v  dqd:%+v\n", q, qmap, rsout, dqd);
     }
 }
