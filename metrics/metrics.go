@@ -71,6 +71,8 @@ func NewCollector() (cr *Collector) {
     }()
 
     go func() {
+        basets := midnight().Unix()
+
         for {
             select {
             case s := <-cr.c:
@@ -81,7 +83,7 @@ func NewCollector() (cr *Collector) {
             case t := <- tr.C:
                 for _, up := range cr.ul {
                     for pi, p := range periods {
-                        if (int(t.Unix()) / 60) % p == 0 {
+                        if (int(t.Unix() - basets) / 60) % p == 0 {
                             up.shift(pi)
                         }
                     }
@@ -174,4 +176,10 @@ func (cr *Collector) Register(title string, units interface{}) {
         cr.ul = append(cr.ul, u)
         st.data = append(st.data, u)
     }
+}
+
+func midnight() time.Time {
+    t := time.Now()
+    y, m, d := t.Date()
+    return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
