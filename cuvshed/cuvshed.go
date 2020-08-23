@@ -3,6 +3,7 @@ package cuvshed
 import (
     _ "vshed/cuinit"
     . "vshed/conf"
+    "vshed/deps"
     "vshed/latlon"
     "fmt"
     "vshed/tiler"
@@ -23,7 +24,10 @@ void stopprof();
 */
 import "C"
 
-func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, hgtmap []uint64, rect latlon.Recti, eventReady uint64) (*tiler.Strip, error) {
+//func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, hgtmap []uint64, rect latlon.Recti, eventReady uint64) (*tiler.Strip, error) {
+func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, g deps.HgtGrid) (*tiler.Strip, error) {
+    hgtmap := g.PtrMap()
+    rect := g.Rect()
     cTS := C.makeTileStrip(
         C.ulong(ctx),
         C.LL{C.float(ll.Lat), C.float(ll.Lon)},
@@ -35,7 +39,7 @@ func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, hgtmap []uint64, r
             C.int(rect.Width),
             C.int(rect.Height),
         },
-        C.ulong(eventReady),
+        C.ulong(g.EvtReady()),
     )
     if (cTS.error.msg != nil) {
         log.Fatalf("CUDA error: %d %s in %s:%d", cTS.error.code, C.GoString(cTS.error.msg), C.GoString(cTS.error.file), cTS.error.line)
@@ -70,7 +74,6 @@ func MakeCtx() uint64 {
 }
 
 func init() {
-    log.Println("cuvshed init")
     C.cuvshedInit(C.Config{
         CUTOFF: CUTOFF,
         CUTON: CUTON,

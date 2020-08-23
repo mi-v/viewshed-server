@@ -46,18 +46,18 @@ type task struct {
 }
 
 var mtx struct {
-    HttpRequests metrics.Unit `mtx:"HTTP requests"`
-    HttpFileResponses metrics.Unit `mtx:"HTTP responses from a file"`
-    TasksCanceled metrics.Unit `mtx:"Canceled tasks"`
-    TasksNew metrics.Unit `mtx:"New tasks queued"`
-    TasksQLen metrics.Unit `mtx:"Task queue length"`
-    TasksQRTO metrics.Unit `mtx:"Task quick reply timeouts"`
-    TasksDone metrics.Unit `mtx:"Tasks finished"`
-    TimeGetGrid metrics.Unit `mtx:"Grid assembly time, ms"`
-    TimeCompute metrics.Unit `mtx:"Computation time, ms"`
-    TimeCutTiles metrics.Unit `mtx:"Tile encoding time, ms"`
-    TilesWritten metrics.Unit `mtx:"Tiles written"`
-    TilesSkipped metrics.Unit `mtx:"Tiles skipped"`
+    HttpRequest metrics.Unit `mtx:". HTTP requests"`
+    HttpFileResponse metrics.Unit `mtx:". HTTP responses from a file"`
+    TaskCanceled metrics.Unit `mtx:". Canceled tasks"`
+    TaskNew metrics.Unit `mtx:". New tasks queued"`
+    TaskQLen metrics.Unit `mtx:"$ Task queue length avg"`
+    TaskQRTO metrics.Unit `mtx:". Task quick reply timeouts"`
+    TaskDone metrics.Unit `mtx:". Tasks finished"`
+    TimeGetGrid metrics.Unit `mtx:"$ Grid assembly time, ms"`
+    TimeCompute metrics.Unit `mtx:"$ Computation time, ms"`
+    TimeCutTiles metrics.Unit `mtx:"$ Tile encoding time, ms"`
+    TilesWritten metrics.Unit `mtx:"$ Tiles written avg/rq"`
+    TilesSkipped metrics.Unit `mtx:"$ Tiles skipped avg/rq"`
 }
 
 func main() {
@@ -73,7 +73,7 @@ func main() {
 
     dc.Tiler = tiler.New()
 
-    dc.HgtMgr, err = hgtmgr.New(HGTDIR)
+    dc.HgtMgr, err = hgtmgr.New(HGTDIR, dc)
     if err != nil {
         log.Fatal(err)
     }
@@ -85,8 +85,10 @@ func main() {
     tasks := make(chan *task)
     go qmgr(tasks, dc)
 
+    http.HandleFunc("/favicon.ico", func (w http.ResponseWriter, r *http.Request) {})
+
     http.HandleFunc("/", func (w http.ResponseWriter, r *http.Request) {
-        mc.Add(&mtx.HttpRequests, 0)
+        mc.Add(&mtx.HttpRequest, 0)
         if r.Method != "GET" {
             http.Error(w, "Unsupported method", http.StatusMethodNotAllowed)
             return
@@ -132,7 +134,7 @@ func main() {
 
         jf, err := os.Open(tiledir + "/layout.json")
         if err == nil {
-            mc.Add(&mtx.HttpFileResponses, 0)
+            mc.Add(&mtx.HttpFileResponse, 0)
             defer jf.Close()
             now := time.Now()
             os.Chtimes(jf.Name(), now, now)
@@ -174,6 +176,8 @@ func main() {
         fmt.Println("encode: ", time.Since(t), "\n")*/
     })
 
+    http.Handle("/mtx", dc.MetricsCollector)
+
     log.Fatal(http.ListenAndServe(":3003", nil))
 }
 
@@ -191,7 +195,7 @@ func worker(tasks chan *task, dc deps.Container) {
         mc.Add(&mtx.TimeGetGrid, int(time.Since(t).Milliseconds()))
 
         t = time.Now()
-        ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, grid.Map, grid.Recti, grid.EvtReady)
+        ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, grid)
         grid.Free()
         if err != nil {
             log.Println(err)
@@ -268,7 +272,7 @@ func qmgr(tkin chan *task, dc deps.Container) {
             delete(rsout, q[0].taskId)
             q = q[1:]
             dqd++
-            mc.Add(&mtx.TasksCanceled, 0)
+            mc.Add(&mtx.TaskCanceled, 0)
         }
 
         if len(q) > 0 { // if we have something queued
@@ -292,7 +296,7 @@ func qmgr(tkin chan *task, dc deps.Container) {
                 }
 
             } else { // if it's not then queue it
-                mc.Add(&mtx.TasksNew, 0)
+                mc.Add(&mtx.TaskNew, 0)
                 rsout[tk.taskId] = tk.replyto // save the task's response channel
                 tk.replyto = rsin // and substitute our own
                 var qe *qentry
@@ -308,11 +312,11 @@ func qmgr(tkin chan *task, dc deps.Container) {
                 }
                 qmap[qe.taskId] = qe
                 q = append(q, qe)
-                mc.Add(&mtx.TasksQLen, len(q))
+                mc.Add(&mtx.TaskQLen, len(q))
             }
 
         case qe := <-qrtc: // a quick reply timed out
-            mc.Add(&mtx.TasksQRTO, 0)
+            mc.Add(&mtx.TaskQRTO, 0)
             pos := qe.pos - dqd
             if pos < 1 {
                 pos = 1
@@ -336,7 +340,7 @@ func qmgr(tkin chan *task, dc deps.Container) {
             }
             delete(qmap, rs.taskId)
             delete(rsout, rs.taskId)
-            mc.Add(&mtx.TasksDone, 0)
+            mc.Add(&mtx.TaskDone, 0)
         }
     }
 }

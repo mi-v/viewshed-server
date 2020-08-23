@@ -72,6 +72,5 @@ func mkHgtName(ll latlon.LLi) string {
 }
 
 func init() {
-    log.Println("cuhgt init")
     hgtBase = uint64(C.cuhgtInit(HGTSLOTS))
 }
