@@ -1,0 +1,19 @@
+[Unit]
+Description=vshed server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+Environment=LD_LIBRARY_PATH=/projects/vshed/current/
+
+Restart=on-failure
+RestartSec=3
+startLimitIntervalSec=60
+
+WorkingDirectory=/projects/vshed/current
+ExecStart=/projects/vshed/current/vshed
+
+[Install]
+WantedBy=multi-user.target

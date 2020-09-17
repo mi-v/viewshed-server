@@ -80,7 +80,7 @@ func NewCollector() (cr *Collector) {
                     s.data[i][0] += s.value
                     s.count[i][0] ++
                 }
-            case t := <- tr.C:
+            case t := <-tr.C:
                 for _, up := range cr.ul {
                     for pi, p := range periods {
                         if (int(t.Unix() - basets) / 60) % p == 0 {

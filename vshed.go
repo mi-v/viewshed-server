@@ -11,6 +11,7 @@ import (
     "vshed/hgtmgr"
     "vshed/tiler"
     "vshed/cuvshed"
+    "vshed/garcol"
     "encoding/json"
     "time"
     //"math"
@@ -21,6 +22,7 @@ import (
     "regexp"
     "strconv"
     "io/ioutil"
+    "flag"
 )
 
 type taskId struct {
@@ -65,6 +67,9 @@ func main() {
     pprof.StartCPUProfile(pf)
     defer pprof.StopCPUProfile()*/
 
+    var port int
+    flag.IntVar(&port, "port", 3003, "port number")
+
     var err error
     dc := deps.Container{}
 
@@ -84,6 +89,11 @@ func main() {
 
     tasks := make(chan *task)
     go qmgr(tasks, dc)
+
+    gc, err := garcol.New(TILEDIR)
+    if err != nil {
+        log.Fatal(err)
+    }
 
     http.HandleFunc("/favicon.ico", func (w http.ResponseWriter, r *http.Request) {})
 
@@ -130,16 +140,18 @@ func main() {
             obsAh,
             obsBh,
         )
-        tiledir := TILEDIR + "/" + tilepath
 
-        jf, err := os.Open(tiledir + "/layout.json")
-        if err == nil {
-            mc.Add(&mtx.HttpFileResponse, 0)
-            defer jf.Close()
-            now := time.Now()
-            os.Chtimes(jf.Name(), now, now)
-            http.ServeContent(w, r, "", time.Time{}, jf)
-            return
+        found := gc.Keep(tilepath)
+        if (found) {
+            jf, err := os.Open(TILEDIR + "/" + tilepath + "/layout.json")
+            if err == nil {
+                mc.Add(&mtx.HttpFileResponse, 0)
+                defer jf.Close()
+                now := time.Now()
+                os.Chtimes(jf.Name(), now, now)
+                http.ServeContent(w, r, "", time.Time{}, jf)
+                return
+            }
         }
 
         rc := make(chan *response)
@@ -178,7 +190,8 @@ func main() {
 
     http.Handle("/mtx", dc.MetricsCollector)
 
-    log.Fatal(http.ListenAndServe(":3003", nil))
+    log.Println("Started.")
+    log.Fatal(http.ListenAndServe(":" + strconv.Itoa(port), nil))
 }
 
 func worker(tasks chan *task, dc deps.Container) {
@@ -305,8 +318,7 @@ func qmgr(tkin chan *task, dc deps.Container) {
                     pos: dqd + len(q) + 1,
                     ts: time.Now(),
                     qrt: time.AfterFunc( // start a timer to notify of a quick reply timeout
-                        //500 * time.Millisecond,
-                        5000 * time.Millisecond,
+                        500 * time.Millisecond,
                         func () {qrtc <- qe},
                     ),
                 }
