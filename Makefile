@@ -16,6 +16,8 @@ build: vshed
 deploy: build
 	mkdir ${DDIR}
 	cp vshed *.so ${DDIR}
+	mkdir ${DDIR}/conf
+	cp conf/nginx.conf ${DDIR}/conf
 	rm ${PDIR}/current
 	ln -s ${DDIR} ${PDIR}/current
 

@@ -190,7 +190,7 @@ func main() {
 
     http.Handle("/mtx", dc.MetricsCollector)
 
-    log.Println("Started.")
+    log.Println("Started at", port)
     log.Fatal(http.ListenAndServe(":" + strconv.Itoa(port), nil))
 }
 
