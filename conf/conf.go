@@ -12,4 +12,4 @@ const MAXWIDTH = 20000
 const TORAD = math.Pi / 180
 const HGTDIR = "/projects/vshed/hgt"
 const TILEDIR = "/projects/vshed/tiles"
-const HGTSLOTS = 500
+const HGTSLOTS = 300

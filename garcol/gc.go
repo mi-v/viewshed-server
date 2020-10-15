@@ -6,7 +6,7 @@ import (
     "fmt"
 )
 
-const ttl = 10 * time.Minute
+const ttl = 30 * time.Minute
 
 type record struct {
     since time.Time
