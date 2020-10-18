@@ -85,7 +85,7 @@ func main() {
 
     mc := dc.MetricsCollector
 
-    originHostRE := regexp.MustCompile(`(votetovid\.ru|mapofviews\.com)(:|/|$)`)
+    originHostRE := regexp.MustCompile(`(votetovid\.ru|mapofviews\.com|sauropod\.xyz)(:|/|$)`)
 
     tasks := make(chan *task)
     go qmgr(tasks, dc)
