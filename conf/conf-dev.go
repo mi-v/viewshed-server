@@ -1,4 +1,4 @@
-// +build !dev
+// +build dev
 
 package conf
 
@@ -13,6 +13,6 @@ const CUTON = 80
 const MAXWIDTH = 20000
 const TORAD = math.Pi / 180
 const HGTDIR = "/projects/vshed/hgt"
-const TILEDIR = "/projects/vshed/tiles"
+const TILEDIR = "/projects/vshed/tiles-dev"
 const HGTSLOTS = 100
-const LISTEN_PORT = 3003
+const LISTEN_PORT = 4003

@@ -412,7 +412,7 @@ clk("unzoom", cus);
 //printf("nby: %d\n", TSbytes);
             cuErr(cudaMalloc(&ctx->TSbuf, TSbytes));
             cuErr(cudaMemsetAsync(ctx->TSbuf, 0, TSbytes, ctx->stream));
-            cudaHostAlloc(&ctx->TSbuf_h, TSbytes, 0);
+            cuErr(cudaHostAlloc(&ctx->TSbuf_h, TSbytes, 0));
         } catch (cuErrX error) {
             cudaStreamDestroy(ctx->stream);
             cudaFree(ctx->HgtMap);

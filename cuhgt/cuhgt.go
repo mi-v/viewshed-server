@@ -73,4 +73,7 @@ func mkHgtName(ll latlon.LLi) string {
 
 func init() {
     hgtBase = uint64(C.cuhgtInit(HGTSLOTS))
+    if hgtBase == 0 {
+        log.Fatal("could not allocate hgt cache")
+    }
 }

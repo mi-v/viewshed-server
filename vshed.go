@@ -68,7 +68,7 @@ func main() {
     defer pprof.StopCPUProfile()*/
 
     var port int
-    flag.IntVar(&port, "port", 3003, "port number")
+    flag.IntVar(&port, "port", LISTEN_PORT, "port number")
 
     var err error
     dc := deps.Container{}
@@ -141,8 +141,13 @@ func main() {
             obsBh,
         )
 
+        if _, keep := r.URL.Query()["keep"]; keep {
+            gc.Keep(tilepath)
+            return
+        }
+
         found := gc.Keep(tilepath)
-        if (found) {
+        if found {
             jf, err := os.Open(TILEDIR + "/" + tilepath + "/layout.json")
             if err == nil {
                 mc.Add(&mtx.HttpFileResponse, 0)

@@ -10,7 +10,9 @@ RELNUM := $(shell date +%d%H%M)
 PDIR = /projects/${PROJ}
 DDIR = ${PDIR}/releases/${RELNUM}
 
-build: vshed
+build-dev: cuda vshed-dev
+
+build: cuda vshed
 
 #deploy: check-if-master build
 deploy: build
@@ -32,3 +34,9 @@ check-if-master:
 
 vshed: $(shell find -type f -name '*.go')
 	GOARCH=amd64 go build -ldflags="-s -w" vshed
+
+vshed-dev: $(shell find -type f -name '*.go')
+	GOARCH=amd64 go build -o vshed-dev -tags dev -ldflags="-s -w" vshed
+
+run: vshed-dev
+	LD_LIBRARY_PATH=. ./vshed-dev

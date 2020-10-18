@@ -77,13 +77,18 @@ extern "C" {
     }
 
     uint64_t cuhgtInit(int slots) {
-        cudaStreamCreate(&cus);
-        cudaHostAlloc(&Hgt_ha, HGTSIZE, cudaHostAllocWriteCombined);
-        cudaHostAlloc(&Hgt_hb, HGTSIZE, cudaHostAllocWriteCombined);
-        cudaEventCreateWithFlags(xfer_a, cudaEventDisableTiming);
-        cudaEventCreateWithFlags(xfer_b, cudaEventDisableTiming);
+        try {
+            cuErr(cudaStreamCreate(&cus));
+            cuErr(cudaHostAlloc(&Hgt_ha, HGTSIZE, cudaHostAllocWriteCombined));
+            cuErr(cudaHostAlloc(&Hgt_hb, HGTSIZE, cudaHostAllocWriteCombined));
+            cuErr(cudaEventCreateWithFlags(xfer_a, cudaEventDisableTiming));
+            cuErr(cudaEventCreateWithFlags(xfer_b, cudaEventDisableTiming));
 
-        cudaMalloc(&Hgtbase, slots * 1280 * 1201 * sizeof(short));
+            cuErr(cudaMalloc(&Hgtbase, slots * 1280 * 1201 * sizeof(short)));
+        } catch (cuErrX error) {
+            Hgtbase = nullptr;
+        }
+
         return (uint64_t)Hgtbase;
     }
 }
