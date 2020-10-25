@@ -24,9 +24,7 @@ struct Context {
     unsigned char* TSbuf_h;
 };
 
-__constant__ float CUTOFF;
 __constant__ float CUTON;
-__constant__ float DSTEP;
 static Config config;
 
 __device__ float interp(float a, float b, float f)
@@ -91,11 +89,11 @@ __global__ void altQuery(const short** __restrict__ HgtMap, Recti rect, LL ll, f
     *result = myH + hgtQuery(HgtMap, rect, ll);
 }
 
-__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, const float* __restrict__ myAlt, LL myL)
+__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, const float* __restrict__ myAlt, LL myL, float dstep)
 {
     int az = blockIdx.x * blockDim.x + threadIdx.x;
     int distN = blockIdx.y * blockDim.y + threadIdx.y;
-    float dist = CUTON + DSTEP * distN * (distN + 1) / 2;
+    float dist = CUTON + dstep * distN * (distN + 1) / 2;
     float rDist = dist / ERAD;
 
     float azR = 2 * PI * az / ANGSTEPS;
@@ -138,7 +136,8 @@ __global__ void doVisMap(
     float theirH,
     Px2 pxBase,
     unsigned char* __restrict__ visMap,
-    int zoom
+    int zoom,
+    float dstep
 )
 {
     Px2 imgPx = {
@@ -160,8 +159,8 @@ __global__ void doVisMap(
     float elev = abElev(*myAlt, hgt, distR);
 
     float dist = ERAD * distR;
-    int distN = floorf((sqrtf(1 + 8 * (dist - CUTON) / DSTEP) - 1) / 2);
-    float distNdist = CUTON + DSTEP * distN * (distN + 1) / 2;
+    int distN = floorf((sqrtf(1 + 8 * (dist - CUTON) / dstep) - 1) / 2);
+    float distNdist = CUTON + dstep * distN * (distN + 1) / 2;
 
     float azR = atan2f(sinf(ptR.lon - myR.lon) * cosf(ptR.lat), cosf(myR.lat) * sinf(ptR.lat) - sinf(myR.lat) * cosf(ptR.lat) * cosf(ptR.lon - myR.lon));
     while (azR < 0) {
@@ -293,7 +292,7 @@ extern "C" {
         return result;
     }
 
-    TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect, uint64_t ihgtsReady) {
+    TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, float cutoff, const uint64_t* HgtMapIn, Recti hgtRect, uint64_t ihgtsReady) {
         Context* ctx = (Context*)ictx;
         const short** HgtMap_d = ctx->HgtMap;
         float* AzEleD_d = ctx->AzEleD;
@@ -302,6 +301,7 @@ extern "C" {
         TileStrip TS = {nullptr};
         cudaStream_t cus = ctx->stream;
         cudaEvent_t *hgtsReady = reinterpret_cast<cudaEvent_t*>(ihgtsReady);
+        float dstep = 2 * (cutoff - config.CUTON) / (DSTEPS * (DSTEPS - 1));
 
         try {
 clk(nullptr, cus);
@@ -318,7 +318,8 @@ clk(nullptr, cus);
                 hgtRect,
                 AzEleD_d,
                 myAlt_d,
-                myL
+                myL,
+                dstep
             );
             cuErr(cudaGetLastError());
 
@@ -326,7 +327,7 @@ clk(nullptr, cus);
             cuErr(cudaGetLastError());
 
             LL myR = myL.toRad();
-            LL rngR = {config.CUTOFF / ERAD};
+            LL rngR = {cutoff / ERAD};
             rngR.lon = -rngR.lat / cosf(myR.lat);
 
             PxRect irect;
@@ -357,7 +358,8 @@ clk(nullptr, cus);
                 theirH,
                 irect.P,
                 TSbuf_d,
-                zoom
+                zoom,
+                dstep
             );
             cuErr(cudaGetLastError());
 clk("doVisMap", cus);
@@ -425,10 +427,7 @@ clk("unzoom", cus);
     }
 
     void cuvshedInit(Config c) {
-        cudaMemcpyToSymbol(CUTOFF, &c.CUTOFF, sizeof(CUTOFF));
         cudaMemcpyToSymbol(CUTON, &c.CUTON, sizeof(CUTON));
-        float dstep = 2 * (c.CUTOFF - c.CUTON) / (DSTEPS * (DSTEPS - 1));
-        cudaMemcpyToSymbol(DSTEP, &dstep, sizeof(DSTEP));
         config = c;
     }
 

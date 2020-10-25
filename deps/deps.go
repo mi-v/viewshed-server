@@ -16,7 +16,7 @@ type HgtGrid interface {
 }
 
 type HgtMgr interface {
-    GetGridAround(latlon.LL) HgtGrid
+    GetGridAround(ll latlon.LL, xrange bool) (grid HgtGrid, cutoff float64)
 }
 
 type Tiler interface {

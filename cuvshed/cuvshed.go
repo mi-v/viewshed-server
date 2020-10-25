@@ -18,14 +18,13 @@ import (
 #cgo LDFLAGS: -L../ -lcuvshed
 
 void cuvshedInit(Config c);
-TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, const uint64_t* HgtMapIn, Recti hgtRect, uint64_t ihgtsReady);
+TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, float cutoff, const uint64_t* HgtMapIn, Recti hgtRect, uint64_t ihgtsReady);
 uint64_t makeContext();
 void stopprof();
 */
 import "C"
 
-//func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, hgtmap []uint64, rect latlon.Recti, eventReady uint64) (*tiler.Strip, error) {
-func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, g deps.HgtGrid) (*tiler.Strip, error) {
+func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, cutoff float64, g deps.HgtGrid) (*tiler.Strip, error) {
     hgtmap := g.PtrMap()
     rect := g.Rect()
     cTS := C.makeTileStrip(
@@ -33,6 +32,7 @@ func TileStrip(ctx uint64, ll latlon.LL, myH int, theirH int, g deps.HgtGrid) (*
         C.LL{C.float(ll.Lat), C.float(ll.Lon)},
         C.int(myH),
         C.int(theirH),
+        C.float(cutoff),
         (*C.ulong)(&hgtmap[0]),
         C.Recti{
             C.LLi{C.int(rect.Lat), C.int(rect.Lon)},
@@ -75,8 +75,8 @@ func MakeCtx() uint64 {
 
 func init() {
     C.cuvshedInit(C.Config{
-        CUTOFF: CUTOFF,
         CUTON: CUTON,
+        CUTOFF: CUTOFF,
         MAXWIDTH: MAXWIDTH,
     })
 }

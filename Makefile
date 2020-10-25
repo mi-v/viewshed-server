@@ -38,5 +38,5 @@ vshed: $(shell find -type f -name '*.go')
 vshed-dev: $(shell find -type f -name '*.go')
 	GOARCH=amd64 go build -o vshed-dev -tags dev -ldflags="-s -w" vshed
 
-run: vshed-dev
+run: build-dev
 	LD_LIBRARY_PATH=. ./vshed-dev

@@ -28,6 +28,7 @@ import (
 type taskId struct {
     ll latlon.LL
     obsAh, obsBh int
+    xrange bool
 }
 
 type response struct {
@@ -133,6 +134,8 @@ func main() {
             return
         }
 
+        _, xrange := r.URL.Query()["xr"]
+
         tilepath := fmt.Sprintf(
             "%+08.4f,%+09.4f,%dah,%dbh",
             lat,
@@ -140,6 +143,10 @@ func main() {
             obsAh,
             obsBh,
         )
+
+        if xrange {
+            tilepath += ",xr"
+        }
 
         if _, keep := r.URL.Query()["keep"]; keep {
             gc.Keep(tilepath)
@@ -164,6 +171,7 @@ func main() {
             taskId: taskId{
                 ll: latlon.LL{lat, lon}.Wrap(),
                 obsAh: obsAh, obsBh: obsBh,
+                xrange: xrange,
             },
             tilepath: tilepath,
             replyto: rc,
@@ -209,11 +217,11 @@ func worker(tasks chan *task, dc deps.Container) {
         var t time.Time
 
         t = time.Now()
-        grid := dc.HgtMgr.GetGridAround(tk.ll)
+        grid, cutoff := dc.HgtMgr.GetGridAround(tk.ll, tk.xrange)
         mc.Add(&mtx.TimeGetGrid, int(time.Since(t).Milliseconds()))
 
         t = time.Now()
-        ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, grid)
+        ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, cutoff, grid)
         grid.Free()
         if err != nil {
             log.Println(err)

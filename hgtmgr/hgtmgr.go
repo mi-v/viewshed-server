@@ -84,18 +84,22 @@ func (m *HgtMgr) GetGrid(rect latlon.Recti, mask []bool) *Grid {
     return <-r
 }
 
-func (m *HgtMgr) GetGridAround(ll latlon.LL) deps.HgtGrid {
-    r := latlon.RectiFromRadius(ll, CUTOFF / CSLAT + 0.1)
+func (m *HgtMgr) GetGridAround(ll latlon.LL, xrange bool) (grid deps.HgtGrid, cutoff float64) {
+    cutoff = CUTOFF
+    if xrange {
+        cutoff = math.Max(cutoff, cutoff * 2 * math.Cos(ll.LatR()))
+    }
+    cutoffD := cutoff / CSLAT + 0.1
+    r := latlon.RectiFromRadius(ll, cutoffD)
     mask := make([]bool, 0, r.Width * r.Height)
     r.Apply(func (cll latlon.LLi) {
-        cutoff := CUTOFF / CSLAT + 0.1
         cllf := cll.Float()
         dY := clamp(ll.Lat, cllf.Lat, cllf.Lat + 1) - ll.Lat
         dX := (clamp(ll.Lon, cllf.Lon, cllf.Lon + 1) - ll.Lon) * math.Cos((ll.LatR() + cllf.LatR()) / 2)
-        mask = append(mask, dX * dX + dY * dY < cutoff * cutoff)
+        mask = append(mask, dX * dX + dY * dY < cutoffD * cutoffD)
     })
 
-    return m.GetGrid(r, mask)
+    return m.GetGrid(r, mask), cutoff
 }
 
 func (g *Grid) PtrMap() []uint64 {
