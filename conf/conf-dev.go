@@ -14,5 +14,5 @@ const MAXWIDTH = 20000
 const TORAD = math.Pi / 180
 const HGTDIR = "/projects/vshed/hgt"
 const TILEDIR = "/projects/vshed/tiles-dev"
-const HGTSLOTS = 150
+const HGTSLOTS = 50
 const LISTEN_PORT = 4003

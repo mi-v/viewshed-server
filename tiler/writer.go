@@ -7,8 +7,8 @@ import (
     "fmt"
     "image"
     "image/color"
-    "vshed/img1b"
-    "vshed/img1b/png"
+    "github.com/mi-v/img1b"
+    "github.com/mi-v/img1b/png"
 )
 
 type Tiler struct {
