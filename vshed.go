@@ -29,6 +29,8 @@ type taskId struct {
     ll latlon.LL
     obsAh, obsBh int
     xrange bool
+    rfrMode int
+    rfrParam float64
 }
 
 type response struct {
@@ -136,6 +138,30 @@ func main() {
 
         _, xrange := r.URL.Query()["xr"]
 
+        rfrMode, _ := strconv.ParseInt(r.URL.Query().Get("rm"), 10, 8)
+        rfrParam, err := strconv.ParseFloat(r.URL.Query().Get("rp"), 64)
+        if rfrMode != 0 && err != nil {
+            log.Println(r.URL)
+            log.Println(err)
+            http.Error(w, "Invalid parameters", 400)
+            return
+        }
+
+        if rfrMode < 0 || rfrMode > 2 {
+            http.Error(w, "Invalid parameters", 400)
+            return
+        }
+
+        if rfrMode == 1 && (rfrParam < 0.5 || rfrParam > 10000) {
+            http.Error(w, "Invalid parameters", 400)
+            return
+        }
+
+        if rfrMode == 2 && (rfrParam < -100 || rfrParam > 100) {
+            http.Error(w, "Invalid parameters", 400)
+            return
+        }
+
         tilepath := fmt.Sprintf(
             "%+08.4f,%+09.4f,%dah,%dbh",
             lat,
@@ -146,6 +172,14 @@ func main() {
 
         if xrange {
             tilepath += ",xr"
+        }
+
+        if rfrMode != 0 {
+            tilepath += fmt.Sprintf(
+                ",%drm,%.2frp",
+                rfrMode,
+                rfrParam,
+            )
         }
 
         if _, keep := r.URL.Query()["keep"]; keep {
@@ -172,6 +206,7 @@ func main() {
                 ll: latlon.LL{lat, lon}.Wrap(),
                 obsAh: obsAh, obsBh: obsBh,
                 xrange: xrange,
+                rfrMode: int(rfrMode), rfrParam: rfrParam,
             },
             tilepath: tilepath,
             replyto: rc,
@@ -221,7 +256,7 @@ func worker(tasks chan *task, dc deps.Container) {
         mc.Add(&mtx.TimeGetGrid, int(time.Since(t).Milliseconds()))
 
         t = time.Now()
-        ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, cutoff, grid)
+        ts, err := cuvshed.TileStrip(ctx, tk.ll, tk.obsAh, tk.obsBh, cutoff, tk.rfrMode, tk.rfrParam, grid)
         grid.Free()
         if err != nil {
             log.Println(err)

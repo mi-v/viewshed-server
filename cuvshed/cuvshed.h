@@ -36,6 +36,15 @@ typedef struct LLi {
 
 typedef struct {LLi ll; int width, height;} Recti;
 
+typedef struct Refract {
+    enum {
+        NONE,
+        RADIUS,
+        TEMP,
+    } mode;
+    float param;
+} Refract;
+
 struct Vec3;
 struct Px2;
 
@@ -70,6 +79,7 @@ struct Vec3 {
 typedef struct Px2 {
     int x, y;
     #ifdef __cplusplus
+    __host__ __device__ bool operator== (Px2 b) {return x == b.x && y == b.y;};
     __host__ __device__ Px2 operator+ (Px2 b) {return Px2{x+b.x, y+b.y};};
     __host__ __device__ Px2& operator++ () {x++; y++; return *this;};
     __host__ __device__ Px2 operator++ (int) {Px2 t(*this); x++; y++; return t;};

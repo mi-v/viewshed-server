@@ -41,14 +41,34 @@ __device__ float seaDistR(LL p0, LL p1)
     ));
 }
 
-__device__ float abElev(float a, float b, float d)
+__device__ float abElev(float a, float b, float d, Refract refract)
 {
-    a /= ERAD;
-    b /= ERAD;
-    if(0)return (a + d * sinf(0.83f * d/2) - b * cos(0.83f * d)) /
-        (d * cos(0.83f * d/2) + b * sin(0.83f * d));
-    return (a + d * sinf(d/2) - b * cos(d)) /
-        (d * cos(d/2) + b * sin(d));
+    float ar = a / ERAD;
+    float br = b / ERAD;
+
+    float k = 1;
+
+    switch (refract.mode) {
+        case refract.RADIUS:
+        k = 1 / refract.param;
+        break;
+
+        case refract.TEMP:
+        float L = 0.0098f;
+        float P0 = 1013.0f;
+        float h = (a + b) / 2;
+        float T0 = refract.param + 273 + L * a;
+        float Th = T0 - L * h;
+        //float P = P0 * powf(1 - L * h / T0, 3.5f);
+        float P = 1 - L * h / T0;
+        P = P0 * P * P * P * sqrtf(P);
+        k = 503.0f * (0.0343f - L) * P / (Th * Th);
+        k = 1 - k;
+        break;
+    }
+
+    return (ar + d * sinf(k * d/2) - br * cos(k * d)) /
+        (d * cos(k * d/2) + br * sin(k * d));
 }
 
 __device__ float hgtQuery(const short** __restrict__ HgtMap, Recti rect, LL ll)
@@ -89,7 +109,7 @@ __global__ void altQuery(const short** __restrict__ HgtMap, Recti rect, LL ll, f
     *result = myH + hgtQuery(HgtMap, rect, ll);
 }
 
-__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, const float* __restrict__ myAlt, LL myL, float dstep)
+__global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float* __restrict__ AzEleD, const float* __restrict__ myAlt, LL myL, Refract refract, float dstep)
 {
     int az = blockIdx.x * blockDim.x + threadIdx.x;
     int distN = blockIdx.y * blockDim.y + threadIdx.y;
@@ -106,7 +126,7 @@ __global__ void doScape(const short** __restrict__ HgtMap, Recti hgtRect, float*
 
     float hgt = hgtQuery(HgtMap, hgtRect, ptL);
 
-    float elev = abElev(*myAlt, hgt, rDist);
+    float elev = abElev(*myAlt, hgt, rDist, refract);
 
     int ofs = distN * ANGSTEPS + az;
     AzEleD[ofs] = elev;
@@ -134,6 +154,7 @@ __global__ void doVisMap(
     LL myL,
     const float* __restrict__ myAlt,
     float theirH,
+    Refract refract,
     Px2 pxBase,
     unsigned char* __restrict__ visMap,
     int zoom,
@@ -156,7 +177,7 @@ __global__ void doVisMap(
 
     float hgt = hgtQuery(HgtMap, hgtRect, ptL) + theirH;
 
-    float elev = abElev(*myAlt, hgt, distR);
+    float elev = abElev(*myAlt, hgt, distR, refract);
 
     float dist = ERAD * distR;
     int distN = floorf((sqrtf(1 + 8 * (dist - CUTON) / dstep) - 1) / 2);
@@ -172,12 +193,11 @@ __global__ void doVisMap(
 
     bool visible = false;
 
-    if (dist < CUTON) {
-        visible = true;
-    }
+    Px2 myPx = myR.toPx2(zoom);
 
-    if (distN >= 0 && distN < DSTEPS && elev - 0.00005 <= interp(AzEleD[distN * ANGSTEPS + az % ANGSTEPS], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
-        Px2 myPx = myR.toPx2(zoom);
+    if (dist < CUTON || ptPx == myPx) {
+        visible = true;
+    } else if (distN >= 0 && distN < DSTEPS && elev - 0.00005 <= interp(AzEleD[distN * ANGSTEPS + az % ANGSTEPS], AzEleD[distN * ANGSTEPS + (az+1) % ANGSTEPS], azf)) {
 
         float pxDist = float(ptPx - myPx);
 
@@ -192,11 +212,10 @@ __global__ void doVisMap(
             dist -= distStep;
             distR -= distRStep;
             ptL -= llStep;
-            ptR = ptL.toRad();
 
             hgt = hgtQuery(HgtMap, hgtRect, ptL);
 
-            float stepElev = abElev(*myAlt, hgt, distR);
+            float stepElev = abElev(*myAlt, hgt, distR, refract);
 
             if (stepElev < elev) {
                 visible = false;
@@ -274,11 +293,12 @@ __global__ void unzoomTiles(uint32_t SrcTiles[][256][256/32], uint32_t DstTiles[
 }
 
 void inline clk(const char* str, cudaStream_t cus) {
-    return;
+    return; /*
     static clock_t t = 0;
     cudaStreamSynchronize(cus);
     if (str) printf("%s: %f\n", str, (float)(clock() - t) / CLOCKS_PER_SEC);
     t = clock();
+    // */
 }
 
 extern "C" {
@@ -292,7 +312,7 @@ extern "C" {
         return result;
     }
 
-    TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, float cutoff, const uint64_t* HgtMapIn, Recti hgtRect, uint64_t ihgtsReady) {
+    TileStrip makeTileStrip(uint64_t ictx, LL myL, int myH, int theirH, float cutoff, Refract refract, const uint64_t* HgtMapIn, Recti hgtRect, uint64_t ihgtsReady) {
         Context* ctx = (Context*)ictx;
         const short** HgtMap_d = ctx->HgtMap;
         float* AzEleD_d = ctx->AzEleD;
@@ -319,6 +339,7 @@ clk(nullptr, cus);
                 AzEleD_d,
                 myAlt_d,
                 myL,
+                refract,
                 dstep
             );
             cuErr(cudaGetLastError());
@@ -356,6 +377,7 @@ clk(nullptr, cus);
                 myL,
                 myAlt_d,
                 theirH,
+                refract,
                 irect.P,
                 TSbuf_d,
                 zoom,
